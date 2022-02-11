@@ -15,12 +15,17 @@ spire-server entry create \
 spire-server entry create \
     -parentID spiffe://example.org/host \
     -spiffeID spiffe://example.org/subject_wl \
-    -selector unix:user:subject_wl
+    -selector docker:label:type:subjectwl
     
 spire-server entry create \
     -parentID spiffe://example.org/host \
     -spiffeID spiffe://example.org/target_wl \
-    -selector unix:user:target_wl  
+    -selector docker:label:type:targetwl 
+    
+spire-server entry create \
+    -parentID spiffe://example.org/host \
+    -spiffeID spiffe://example.org/target_wl \
+    -selector docker:label:type:middletier 
 ```
 
 - Users subject_wl and target_wl, to execute locally the components and simulate different client calls  
