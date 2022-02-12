@@ -1,6 +1,13 @@
-# Asserting Workload --prototype-- 
+# Transitive Identity & Embedded Claims
+## Proof of Concept
 
-This application exposes an API that allow callers to send an OAuth Token (Okta or Google) and receive a new JWT token (DA-SVID) that binds the original subject to caller workload, in that a way that caller workload can act in behalf of original Oauth token subject claim (end-user).
+This Proof of Concept simulates a banking application with two frontends: Subject Workload and Subject Workload Mobile. The business logic says that only Subject Workload is allowed to use DA-SVIDs to access specific functions as check balance and make deposits in behalf of end-user.
+
+In this scenario, all workloads are SPIFFE identified Docker containers and the Asserting Workload is a trusted component allowed to mint new DA-SVID tokens. When the the application frontend needs to access end-user data, it stablish an SPIRE mTLS connection with Asserting Workload, sending the end-user OAuth token. The Asserting Workload, by its side, receives the OAuth token, mint a DA-SVID (claims described at ... ref doc...) and sign with its private key (can be its SVID or another specific key), sending back to subject workload.
+
+Middle tier simulates a generic cloud application component (e.g. load balancer), to exemplify DA-SVID transitivity. In this PoC, when receive requests that uses DA-SVID, it first validate its expiration and signature. After that, middle tier uses Asserting Workload introspect endpoint to validate the DA-SVID. Requests with valid DA-SVID are send to Target Workload.
+
+When Target Workload receives a request with DA-SVID, it also check its expiration and signature. If the token is valid, Target Workload parse its claims and verify if DA-SVID subject claim is allowed to use DA-SVID. Then, TW extract dpr claim and perform a database search for that user, returning user balance or error message.
 
 ## Prerequisites
 
