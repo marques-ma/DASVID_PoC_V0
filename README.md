@@ -11,7 +11,9 @@ When Target Workload receives a request with DA-SVID, it also check its expirati
 
 ## Prerequisites
 
-- SPIRE-Server and Agent up and running
+- OKTA account (Application with client ID, client Secret and authorized callback URI.
+- Docker
+- SPIRE-Server and Agent (host) up and running
 - SPIRE entries:
 ```
 spire-server entry create \
@@ -26,6 +28,11 @@ spire-server entry create \
     
 spire-server entry create \
     -parentID spiffe://example.org/host \
+    -spiffeID spiffe://example.org/subject_mob \
+    -selector docker:label:type:subjectmob
+    
+spire-server entry create \
+    -parentID spiffe://example.org/host \
     -spiffeID spiffe://example.org/target_wl \
     -selector docker:label:type:targetwl 
     
@@ -35,13 +42,12 @@ spire-server entry create \
     -selector docker:label:type:middletier 
 ```
 
-- Users subject_wl and target_wl, to execute locally the components and simulate different client calls  
-- Go and/or Docker
 
-To execute in a Docker container
+To execute components, go to component directory, build and run docker image, exposing necessary ports and mapping correct UDS volume as example:
+
 ```
-docker build . -t asserting_wl
-docker run -p 8443:8443 -v /tmp/spire-agent/public/api.sock:/tmp/spire-agent/public/api.sock -d asserting_wl
+docker build . -t <asserting_wl/subject_wl/middle_tier/target_wl>
+docker run -p <8443:8443/8080/8445/8444> -v /tmp/spire-agent/public/api.sock:/tmp/spire-agent/public/api.sock -d <asserting_wl/subject_wl/middle_tier/target_wl>
 ```
 
 # How it works
