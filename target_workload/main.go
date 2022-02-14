@@ -8,7 +8,6 @@ import (
 	"net/http"
 	"os"
 	"context"
-	// "io"
 	"io/ioutil"
 	"time"
 	"bufio"
@@ -20,13 +19,9 @@ import (
 	"github.com/spiffe/go-spiffe/v2/workloadapi"
 	"github.com/spiffe/go-spiffe/v2/spiffeid"
 	"github.com/spiffe/go-spiffe/v2/spiffetls/tlsconfig"
-	// "github.com/spiffe/go-spiffe/v2/svid/x509svid"
 	
 	// dasvid lib
 	dasvid "github.com/marco-developer/dasvid/poclib"
-
-	// To generate a sample ZKP response
-	// "crypto/sha256"
 
 )
 
@@ -72,6 +67,7 @@ var temp Contents
 
 const (
 	socketPath    = "unix:///tmp/spire-agent/public/api.sock"
+	AssertingwlIP 	= "192.168.0.5:8443" 
 )
 
 func timeTrack(start time.Time, name string) {
@@ -138,14 +134,13 @@ func Get_balanceHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Validate DASVID
-	serverURL := GetOutboundIP(":8443")
 	datoken := r.FormValue("DASVID")
 	dasvidclaims := dasvid.ParseTokenClaims(datoken)
-	endpoint := "https://"+serverURL+"/validate?DASVID="+datoken
+	endpoint := "https://"+AssertingwlIP+"/validate?DASVID="+datoken
 
 	response, err := client.Get(endpoint)
 	if err != nil {
-		log.Fatalf("Error connecting to %q: %v", serverURL, err)
+		log.Fatalf("Error connecting to %q: %v", AssertingwlIP, err)
 	}
 
 	defer response.Body.Close()
@@ -194,6 +189,22 @@ func Get_balanceHandler(w http.ResponseWriter, r *http.Request) {
 		json.NewEncoder(w).Encode(tempbalance)
 		return
 	}
+
+    // This PoC will consider that only DA-SVID with "subject_wl" in sub claim will be able request data
+	if dasvidclaims["sub"].(string) != "spiffe://example.org/subject_wl"{
+
+        returnmsg = "The application "+dasvidclaims["sub"].(string)+" is not allowed to access user data!"
+		log.Printf(returnmsg)
+
+		tempbalance = Balancetemp{
+			User:		"",
+			Balance:	0,
+			Returnmsg: 	returnmsg,
+		}
+
+        json.NewEncoder(w).Encode(tempbalance)
+        return
+    }
 
 	
 	// Open dasvid cache file
@@ -269,14 +280,13 @@ func DepositHandler(w http.ResponseWriter, r *http.Request) {
 		},
 	}
 	
-	serverURL := GetOutboundIP(":8443")
 	datoken := r.FormValue("DASVID")
 	dasvidclaims := dasvid.ParseTokenClaims(datoken)
-	endpoint := "https://"+serverURL+"/validate?DASVID="+datoken
+	endpoint := "https://"+AssertingwlIP+"/validate?DASVID="+datoken
 
 	response, err := client.Get(endpoint)
 	if err != nil {
-		log.Fatalf("Error connecting to %q: %v", serverURL, err)
+		log.Fatalf("Error connecting to %q: %v", AssertingwlIP, err)
 	}
 
 	defer response.Body.Close()
@@ -322,6 +332,20 @@ func DepositHandler(w http.ResponseWriter, r *http.Request) {
 
 		// log.Printf(returnmsg)
 		json.NewEncoder(w).Encode(tempbalance)
+		return
+	}
+
+	// This PoC will consider that only DA-SVID with "subject_wl" in sub claim will be able request data
+	if dasvidclaims["sub"].(string) != "subject_wl"{
+
+		returnmsg = "Unauthorized subject workload!"
+		log.Printf(returnmsg)
+			tempbalance = Balancetemp{
+			User:		"",
+			Balance:	0,
+			Returnmsg: 	returnmsg,
+		}
+			json.NewEncoder(w).Encode(tempbalance)
 		return
 	}
 
