@@ -213,7 +213,8 @@ func MintHandler(w http.ResponseWriter, r *http.Request) {
 
 			// Gen ZKP (Does it should be here??)
 			zkp := sha256.New()
-			zkp.Write([]byte(fmt.Sprintf("%v",oauthtoken+token)))
+			zkp.Write([]byte(fmt.Sprintf("%v",token)))
+			log.Println("Generated ZKP: ", fmt.Sprintf("%x",zkp.Sum(nil)))
 
 			// Data to be returned in API 
 			Data = PocData{
@@ -309,6 +310,7 @@ func IntrospectHandler(w http.ResponseWriter, r *http.Request) {
 		}
 		
 		if Filetemp.DASVIDToken == datoken {
+			log.Println("DASVID ZKP identified!", Filetemp.ZKP )
 			json.NewEncoder(w).Encode(Filetemp)
 			return
 		}

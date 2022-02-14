@@ -49,6 +49,7 @@ const (
 	HostIP 			= "192.168.0.5:8080"
 	AssertingwlIP 	= "192.168.0.5:8443" 
 	TargetwlIP		= "192.168.0.5:8444"
+	MiddletierIP	= "192.168.0.5:8445"
 )
 
 type Exchange struct {
@@ -142,7 +143,7 @@ func main() {
 	http.HandleFunc("/logout", LogoutHandler)
 
 	http.HandleFunc("/account", AccountHandler)
-	http.HandleFunc("/get_balance", CheckbalanceHandler)
+	http.HandleFunc("/get_balance", Get_balanceHandler)
 	http.HandleFunc("/deposit", DepositHandler)
 
 	http.Handle("/img/", http.StripPrefix("/img/", http.FileServer(http.Dir("./img"))))
@@ -306,9 +307,9 @@ func AccountHandler(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func CheckbalanceHandler(w http.ResponseWriter, r *http.Request) {
+func Get_balanceHandler(w http.ResponseWriter, r *http.Request) {
 
-	defer timeTrack(time.Now(), "Check Balance")
+	defer timeTrack(time.Now(), "Get Balance")
 	
 	var funds Balancetemp
 
@@ -334,11 +335,11 @@ func CheckbalanceHandler(w http.ResponseWriter, r *http.Request) {
 
 	dasvidclaims := dasvid.ParseTokenClaims(os.Getenv("DASVIDToken"))
 
-	endpoint := "https://"+TargetwlIP+"/get_balance?DASVID="+os.Getenv("DASVIDToken")
+	endpoint := "https://"+MiddletierIP+"/get_balance?DASVID="+os.Getenv("DASVIDToken")
 
 	response, err := client.Get(endpoint)
 	if err != nil {
-		log.Fatalf("Error connecting to %q: %v", TargetwlIP, err)
+		log.Fatalf("Error connecting to %q: %v", MiddletierIP, err)
 	}
 
 	defer response.Body.Close()
@@ -409,11 +410,11 @@ func DepositHandler(w http.ResponseWriter, r *http.Request) {
 		},
 	}
 
-	endpoint := "https://"+TargetwlIP+"/deposit?DASVID="+os.Getenv("DASVIDToken")+"&deposit="+r.FormValue("deposit")
+	endpoint := "https://"+MiddletierIP+"/deposit?DASVID="+os.Getenv("DASVIDToken")+"&deposit="+r.FormValue("deposit")
 
 	response, err := client.Get(endpoint)
 	if err != nil {
-		log.Fatalf("Error connecting to %q: %v", TargetwlIP, err)
+		log.Fatalf("Error connecting to %q: %v", MiddletierIP, err)
 	}
 
 	defer response.Body.Close()
