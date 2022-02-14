@@ -336,7 +336,7 @@ func DepositHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// This PoC will consider that only DA-SVID with "subject_wl" in sub claim will be able request data
-	if dasvidclaims["sub"].(string) != "subject_wl"{
+	if dasvidclaims["sub"].(string) != "spiffe://example.org/subject_wl"{
 
 		returnmsg = "Unauthorized subject workload!"
 		log.Printf(returnmsg)
