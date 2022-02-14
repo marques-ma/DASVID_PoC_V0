@@ -6,27 +6,18 @@ import (
 	"fmt"
 	"log"
 	"net/http"
-	"os"
 	"context"
-	// "io"
 	"io/ioutil"
 	"time"
-	"bufio"
 	"net"
-	"strconv"
 	
-
 	// SPIFFE
 	"github.com/spiffe/go-spiffe/v2/workloadapi"
 	"github.com/spiffe/go-spiffe/v2/spiffeid"
 	"github.com/spiffe/go-spiffe/v2/spiffetls/tlsconfig"
-	// "github.com/spiffe/go-spiffe/v2/svid/x509svid"
 	
-	// dasvid lib
-	dasvid "github.com/marco-developer/dasvid/poclib"
-
 	// To generate a sample ZKP response
-	// "crypto/sha256"
+	"crypto/sha256"
 
 )
 
@@ -47,32 +38,15 @@ type Balancetemp struct {
 	User						string `json:",omitempty"`
 	Balance						int `json`
 	Returnmsg					string `json:",omitempty"`
-
 }
 
-type PocData struct {
-	AccessToken     			string `json:",omitempty"`
-	PublicKey					string `json:",omitempty"`
-	OauthSigValidation 			*bool `json:",omitempty"`
-	OauthExpValidation 			*bool `json:",omitempty"`
-	OauthExpRemainingTime		string `json:",omitempty"`
-	OauthClaims					map[string]interface{} `json:",omitempty"`
-	DASVIDToken					string `json:",omitempty"`
-	DASVIDClaims 				map[string]interface{} `json:",omitempty"`
-	DasvidExpValidation 		*bool `json:",omitempty"`
-	DasvidExpRemainingTime		string `json:",omitempty"`
-	DasvidSigValidation 		*bool `json:",omitempty"`
-
-		
-}
-
-var Data PocData
-var Filetemp FileContents
 var temp Contents
 
 const (
 	socketPath    = "unix:///tmp/spire-agent/public/api.sock"
-	hostIP			= "192.168.0.5"
+	// Define local environment settings
+	AssertingwlIP 	= "192.168.0.5:8443" 
+	TargetwlIP		= "192.168.0.5:8444"
 )
 
 func timeTrack(start time.Time, name string) {
@@ -104,7 +78,7 @@ func main() {
 		TLSConfig: tlsConfig,
 	}
 	
-	log.Printf("Start serving Target Workload API...")
+	log.Printf("Start serving Middle tier API...")
 	if err := server.ListenAndServeTLS("", ""); err != nil {
 		log.Fatalf("Error on serve: %v", err)
 	}
@@ -139,14 +113,33 @@ func Get_balanceHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Validate DASVID
-	serverURL := hostIP+":8443"
 	datoken := r.FormValue("DASVID")
-	dasvidclaims := dasvid.ParseTokenClaims(datoken)
-	endpoint := "https://"+serverURL+"/validate?DASVID="+datoken
+	endpoint := "https://"+AssertingwlIP+"/validate?DASVID="+datoken
 
-	returnmsg := validateDASVID(endpoint, client)
+	response, err := client.Get(endpoint)
+	if err != nil {
+		log.Fatalf("Error connecting to %q: %v", AssertingwlIP, err)
+	}
 
-	if returnmsg != "ok" {
+	defer response.Body.Close()
+	body, err := ioutil.ReadAll(response.Body)
+	if err != nil {
+		log.Fatalf("Unable to read body: %v", err)
+	}
+
+	err = json.Unmarshal([]byte(body), &temp)
+	if err != nil {
+		log.Fatalf("error:", err)
+	}
+
+	var returnmsg string
+
+	log.Println("Sig validation: ", *temp.DasvidSigValidation)
+	log.Println("exp validation: ", *temp.DasvidExpValidation)
+
+	if (*temp.DasvidSigValidation == false) {
+				
+		returnmsg = "DA-SVID signature validation error"
 
 		tempbalance = Balancetemp{
 			User:		"",
@@ -154,55 +147,53 @@ func Get_balanceHandler(w http.ResponseWriter, r *http.Request) {
 			Returnmsg: 	returnmsg,
 		}
 
-		log.Printf(returnmsg)
-		json.NewEncoder(w).Encode(tempbalance)		
+		json.NewEncoder(w).Encode(tempbalance)
 		return
 	}
-	
-	// Open dasvid cache file
-	balance, err := os.OpenFile("./data/balance.data", os.O_CREATE, 0644) 
-	if err != nil {
-		log.Fatal(err)
-	}
-	defer balance.Close()
 
-	// Iterate over lines looking for DASVID token
-	scanner := bufio.NewScanner(balance)
+	if (*temp.DasvidExpValidation == false) {
+				
+		returnmsg = "DA-SVID expiration validation error"
+		log.Println("Return Msg: ", tempbalance.Returnmsg)
 
-	for scanner.Scan() {
-
-		json.Unmarshal([]byte(scanner.Text()), &tempbalance)
-		if err != nil {
-			log.Fatalf("error:", err)
+		tempbalance = Balancetemp{
+			User:		"",
+			Balance:	0,
+			Returnmsg: 	returnmsg,
 		}
-		
-		if tempbalance.User == dasvidclaims["dpr"] {
-			json.NewEncoder(w).Encode(tempbalance)
-			return
-		}
-    }
-    if scanner.Err() != nil {
-        log.Printf("Error reading Balance data file: %v", scanner.Err())
-    }
 
-	f, err := os.OpenFile("./data/balance.data", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+		json.NewEncoder(w).Encode(tempbalance)
+		return
+	}
+
+	tempbalance = introspect(r.FormValue("DASVID"), *client)
+	if tempbalance.Returnmsg != "" {
+		log.Println("ZKP error! %v", tempbalance.Returnmsg)
+		json.NewEncoder(w).Encode(tempbalance)
+	}
+
+	// Access Target WL and request DASVID user balance
+	endpoint = "https://"+TargetwlIP+"/get_balance?DASVID="+r.FormValue("DASVID")
+
+	response, err = client.Get(endpoint)
 	if err != nil {
-		log.Fatal(err)
-	}
-	log.Printf("Adding user to file...")
-
-	tempbalance = Balancetemp{
-		User:		fmt.Sprintf("%v", dasvidclaims["dpr"]),
-		Balance:	0,
-	}
-	json.NewEncoder(f).Encode(tempbalance)
-	if err := f.Close(); err != nil {
-		log.Fatal(err)
+		log.Fatalf("Error connecting to %q: %v", TargetwlIP, err)
 	}
 
+	defer response.Body.Close()
+	body, err = ioutil.ReadAll(response.Body)
+	if err != nil {
+		log.Fatalf("Unable to read body: %v", err)
+	}
 
+	// Receive data and return it to subject.
+	err = json.Unmarshal([]byte(body), &tempbalance)
+	if err != nil {
+		fmt.Println("error:", err)
+	}
 
-	json.NewEncoder(w).Encode("User not found")
+	json.NewEncoder(w).Encode(tempbalance)
+
 }
 
 func DepositHandler(w http.ResponseWriter, r *http.Request) {
@@ -210,7 +201,7 @@ func DepositHandler(w http.ResponseWriter, r *http.Request) {
 	defer timeTrack(time.Now(), "DepositHandler")
 
 	var tempbalance Balancetemp
-	
+
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -232,14 +223,33 @@ func DepositHandler(w http.ResponseWriter, r *http.Request) {
 		},
 	}
 
-	serverURL := hostIP+":8443"
-	datoken := r.FormValue("DASVID")
-	dasvidclaims := dasvid.ParseTokenClaims(datoken)
-	endpoint := "https://"+serverURL+"/validate?DASVID="+datoken
+	// Validate DASVID
+	endpoint := "https://"+AssertingwlIP+"/validate?DASVID="+r.FormValue("DASVID")
 
-	returnmsg := validateDASVID(endpoint, client)
+	response, err := client.Get(endpoint)
+	if err != nil {
+		log.Fatalf("Error connecting to %q: %v", AssertingwlIP, err)
+	}
 
-	if returnmsg != "ok" {
+	defer response.Body.Close()
+	body, err := ioutil.ReadAll(response.Body)
+	if err != nil {
+		log.Fatalf("Unable to read body: %v", err)
+	}
+
+	err = json.Unmarshal([]byte(body), &temp)
+	if err != nil {
+		log.Fatalf("error:", err)
+	}
+
+	var returnmsg string
+
+	log.Println("Sig validation: ", *temp.DasvidSigValidation)
+	log.Println("exp validation: ", *temp.DasvidExpValidation)
+
+	if (*temp.DasvidSigValidation == false) {
+				
+		returnmsg = "DA-SVID signature validation error"
 
 		tempbalance = Balancetemp{
 			User:		"",
@@ -247,75 +257,52 @@ func DepositHandler(w http.ResponseWriter, r *http.Request) {
 			Returnmsg: 	returnmsg,
 		}
 
-		log.Printf(returnmsg)
-		json.NewEncoder(w).Encode(tempbalance)		
+		json.NewEncoder(w).Encode(tempbalance)
 		return
 	}
 
-	// Open dasvid cache file
-	balance, err := os.OpenFile("./data/balance.data", os.O_CREATE, 0644) 
-	if err != nil {
-		log.Fatal(err)
-	}
-	defer balance.Close()
+	if (*temp.DasvidExpValidation == false) {
+				
+		returnmsg = "DA-SVID expiration validation error"
+		log.Println("Return Msg: ", tempbalance.Returnmsg)
 
-	// Iterate over lines looking for username
-	scanner := bufio.NewScanner(balance)
-
-	for scanner.Scan() {
-
-		json.Unmarshal([]byte(scanner.Text()), &tempbalance)
-		if err != nil {
-			log.Fatalf("error:", err)
+		tempbalance = Balancetemp{
+			User:		"",
+			Balance:	0,
+			Returnmsg: 	returnmsg,
 		}
-		
-		if tempbalance.User == dasvidclaims["dpr"] {
 
-			log.Println("User "+tempbalance.User+" found! Updating balance...")
+		json.NewEncoder(w).Encode(tempbalance)
+		return
+	}
 
-			log.Println("Balance is ", tempbalance.Balance)
-			tmpdeposit, _ := strconv.Atoi(r.FormValue("deposit"))
-			tempbalance.Balance += tmpdeposit
-			log.Println("New Balance is ", tempbalance.Balance)
+	tempbalance = introspect(r.FormValue("DASVID"), *client)
+	if tempbalance.Returnmsg != "" {
+		log.Println("ZKP error! %v", tempbalance.Returnmsg)
+		json.NewEncoder(w).Encode(tempbalance)
+	}
 
-			tmp, err := json.Marshal(tempbalance)
-			if err != nil {
-				fmt.Println("error:", err)
-			}
+	endpoint = "https://"+TargetwlIP+"/deposit?DASVID="+r.FormValue("DASVID")+"&deposit="+r.FormValue("deposit")
 
-			err = os.WriteFile("./data/balance.data", []byte(tmp), 0)
-			if err != nil {
-				panic(err)
-			}
-
-			tempbalance = Balancetemp{
-				User:		tempbalance.User,
-				Balance:	tempbalance.Balance,
-			}
-
-			json.NewEncoder(w).Encode(tempbalance)
-			return
-		}
-    }
-    if scanner.Err() != nil {
-        log.Printf("Error reading Balance data file: %v", scanner.Err())
-    }
-
-	f, err := os.OpenFile("./data/balance.data", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	response, err = client.Get(endpoint)
 	if err != nil {
-		log.Fatal(err)
+		log.Fatalf("Error connecting to %q: %v", TargetwlIP, err)
 	}
-	log.Printf("Adding user to file...")
 
-	tempbalance = Balancetemp{
-		User:		fmt.Sprintf("%v", dasvidclaims["dpr"]),
-		Balance:	0,
+	defer response.Body.Close()
+	body, err = ioutil.ReadAll(response.Body)
+	if err != nil {
+		log.Fatalf("Unable to read body: %v", err)
 	}
-	json.NewEncoder(f).Encode(tempbalance)
-	if err := f.Close(); err != nil {
-		log.Fatal(err)
+
+	// Receive data and return it to subject.
+	err = json.Unmarshal([]byte(body), &tempbalance)
+	if err != nil {
+		fmt.Println("error:", err)
 	}
-	json.NewEncoder(w).Encode("User not found")
+
+	json.NewEncoder(w).Encode(tempbalance)
+	
 }
 
 func GetOutboundIP(port string) string {
@@ -331,12 +318,17 @@ func GetOutboundIP(port string) string {
     return uri
 }
 
-func validateDASVID(endpoint string, client *http.Client) string {
+func introspect(datoken string, client http.Client) (tempbalance Balancetemp) {
+	
+	// Introspect DA-SVID
+	var returnmsg string
+	var rcvresp FileContents
 
-	serverURL := hostIP+":8443"
+	endpoint := "https://"+AssertingwlIP+"/introspect?DASVID="+datoken
+
 	response, err := client.Get(endpoint)
 	if err != nil {
-		log.Fatalf("Error connecting to %q: %v", serverURL, err)
+		log.Fatalf("Error connecting to %q: %v", AssertingwlIP, err)
 	}
 
 	defer response.Body.Close()
@@ -345,23 +337,21 @@ func validateDASVID(endpoint string, client *http.Client) string {
 		log.Fatalf("Unable to read body: %v", err)
 	}
 
-	err = json.Unmarshal([]byte(body), &temp)
+	err = json.Unmarshal([]byte(body), &rcvresp)
 	if err != nil {
 		log.Fatalf("error:", err)
 	}
 
-	log.Println("Sig validation: ", *temp.DasvidSigValidation)
-	log.Println("exp validation: ", *temp.DasvidExpValidation)
+	zkptmp := sha256.New()
+	zkptmp.Write([]byte(fmt.Sprintf("%v",datoken)))
 
-	if (*temp.DasvidSigValidation == false) {
-		
-		return "DA-SVID signature validation error"
+	if fmt.Sprintf("%x",zkptmp.Sum(nil)) != rcvresp.ZKP {
+		returnmsg = "ZKP error!"
+	} else { returnmsg = "" }
+
+	tempbalance = Balancetemp{
+		Returnmsg: 	returnmsg,
 	}
 
-	if (*temp.DasvidExpValidation == false) {
-				
-		return "DA-SVID expiration validation error"
-	}
-
-	return "ok"
+	return tempbalance
 }
