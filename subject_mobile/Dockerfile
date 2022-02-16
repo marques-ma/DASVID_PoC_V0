@@ -22,7 +22,7 @@ RUN go mod download
 RUN go build -o main .
 
 # Export necessary port
-EXPOSE 8444
+EXPOSE 8181
 
 # Command to run when starting the container
 CMD ["/build/main"]
