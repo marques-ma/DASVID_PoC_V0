@@ -6,7 +6,7 @@ ENV GO111MODULE=on \
     GOOS=linux \
     GOARCH=amd64
 
-LABEL "type"="subjectmobile"
+LABEL "type"="middletier"
 
 # Create and move to working directory
 RUN mkdir /build
@@ -22,7 +22,7 @@ RUN go mod download
 RUN go build -o main .
 
 # Export necessary port
-EXPOSE 8444
+EXPOSE 8445
 
 # Command to run when starting the container
 CMD ["/build/main"]

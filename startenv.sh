@@ -43,6 +43,10 @@ start_spire_agent () {
 
 start_spire_agent
 
+<<<<<<< Updated upstream
+=======
+
+>>>>>>> Stashed changes
 spire-server entry create \
     -parentID spiffe://example.org/host \
     -spiffeID spiffe://example.org/asserting_wl \
@@ -66,4 +70,8 @@ spire-server entry create \
 spire-server entry create \
     -parentID spiffe://example.org/host \
     -spiffeID spiffe://example.org/middletier \
+<<<<<<< Updated upstream
     -selector docker:label:type:middletier
+=======
+    -selector docker:label:type:middletier 
+>>>>>>> Stashed changes

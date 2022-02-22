@@ -172,6 +172,8 @@ func Get_balanceHandler(w http.ResponseWriter, r *http.Request) {
 		json.NewEncoder(w).Encode(tempbalance)
 	}
 
+	log.Println("ZKP sucessfully validated!")
+
 	// Access Target WL and request DASVID user balance
 	endpoint = "https://"+TargetwlIP+"/get_balance?DASVID="+r.FormValue("DASVID")
 
@@ -281,6 +283,8 @@ func DepositHandler(w http.ResponseWriter, r *http.Request) {
 		log.Println("ZKP error! %v", tempbalance.Returnmsg)
 		json.NewEncoder(w).Encode(tempbalance)
 	}
+
+	log.Println("ZKP sucessfully validated!")
 
 	endpoint = "https://"+TargetwlIP+"/deposit?DASVID="+r.FormValue("DASVID")+"&deposit="+r.FormValue("deposit")
 
