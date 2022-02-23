@@ -1,4 +1,6 @@
-FROM golang:alpine
+# Stage 1 - Builder Img
+# Define the building base image
+FROM golang:alpine AS builder
 
 # Set environmet variables
 ENV GO111MODULE=on \
@@ -12,17 +14,28 @@ LABEL "type"="targetwl"
 RUN mkdir /build
 WORKDIR /build
 
-# Copy the code
+# Copy in files to Img
 COPY . .
 
-# Copy and download dependency
+# Download dependencies
 RUN go mod download
 
-# Build the application
 RUN go build -o main .
+
+# Stage 2 - Application Img
+# Define the running base image 
+FROM alpine 
+
+### Set working directory  
+RUN mkdir /build
+WORKDIR /build
+
+### Copy in built application and other files
+COPY --from=builder /build /build
 
 # Export necessary port
 EXPOSE 8444
 
 # Command to run when starting the container
 CMD ["/build/main"]
+# - or instead for debuging ... ENTRYPOINT ["tail", "-f", "/dev/null"]
