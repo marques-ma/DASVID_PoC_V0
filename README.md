@@ -78,4 +78,6 @@ This endpoint return the DA-SVID original claims and a proof that a valid OAuth 
 
 # References
 
-[OIDC Web Setup Instructions]: https://developer.okta.com/authentication-guide/implementing-authentication/auth-code#1-setting-up-your-application
+https://developer.okta.com/authentication-guide/implementing-authentication/auth-code#1-setting-up-your-application
+
+
