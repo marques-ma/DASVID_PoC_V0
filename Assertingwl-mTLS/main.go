@@ -147,6 +147,7 @@ func MintHandler(w http.ResponseWriter, r *http.Request) {
 		// Google endpoint:
 		// https://www.googleapis.com/oauth2/v3/certs
 
+		fmt.Println("OAuth Issuer: ", tokenclaims["iss"])
 		issuer := fmt.Sprintf("%v", tokenclaims["iss"])
 		var uri string
 
@@ -176,9 +177,13 @@ func MintHandler(w http.ResponseWriter, r *http.Request) {
 
 		// Read key from cache file
 		pubkey := dasvid.RetrieveJWKSPublicKey("./data/oauthjwkskey.cache")
+		fmt.Println("Pubkey in main", pubkey.Keys[0])
 
 		// Verify token signature using extracted Public key
-		err = dasvid.VerifySignature(oauthtoken, pubkey.Keys[0])
+		// //////////////////////////////////
+		// TODO: create loop to test all keys in file
+		//////////////////////////////////////
+		err = dasvid.VerifySignature(oauthtoken, pubkey.Keys[1])
 		if err != nil {
 
 			log.Fatalf("Error verifying OAuth signature: %v", err)

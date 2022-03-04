@@ -604,6 +604,7 @@ func getdasvid(oauthtoken string) (string) {
 
 	var endpoint string
 	token := os.Getenv("oauthtoken")
+	fmt.Println("OAuth Token: ", token)
 	endpoint = "https://"+AssertingwlIP+"/mint?AccessToken="+token
 
 	r, err := client.Get(endpoint)

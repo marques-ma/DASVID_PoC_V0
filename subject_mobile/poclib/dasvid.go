@@ -25,12 +25,7 @@ import (
     "encoding/pem"
 
 	// To JWT generation
-	// Obs: change jwt lib togo-jose could be good as it is the lib used in spire 
-	// "gopkg.in/square/go-jose.v2"
-	// "gopkg.in/square/go-jose.v2/cryptosigner"
-	// mintJWT "gopkg.in/square/go-jose.v2/jwt"
 	mint "github.com/golang-jwt/jwt"
-	JWTworker "github.com/dgrijalva/jwt-go"
 	"flag"
 
 	// To fetch SVID
@@ -147,13 +142,17 @@ func Mintdasvid(iss string, sub string, dpa string, dpr string, key interface{})
 }
 
 func ParseTokenClaims(strAT string) map[string]interface{} {
+
+	defer timeTrack(time.Now(), "Parse token claims")
+
 		// Parse access token without validating signature
-		token, _, err := new(JWTworker.Parser).ParseUnverified(strAT, JWTworker.MapClaims{})
+		token, _, err := new(mint.Parser).ParseUnverified(strAT, mint.MapClaims{})
 		if err != nil {
 			log.Fatalf("Error parsing JWT claims: %v", err)
 		}
-		claims, _ := token.Claims.(JWTworker.MapClaims)
+		claims, _ := token.Claims.(mint.MapClaims)
 		
+		// fmt.Println(claims)
 		return claims
 }
 
