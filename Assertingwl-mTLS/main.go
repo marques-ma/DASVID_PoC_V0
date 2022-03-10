@@ -22,7 +22,7 @@ import (
 	dasvid "github.com/marco-developer/dasvid/poclib"
 
 	// To generate a sample ZKP response
-	"crypto/sha256"
+	// "crypto/sha256"
 
 )
 
@@ -183,7 +183,7 @@ func MintHandler(w http.ResponseWriter, r *http.Request) {
 		// //////////////////////////////////
 		// TODO: create loop to test all keys in file
 		//////////////////////////////////////
-		err = dasvid.VerifySignature(oauthtoken, pubkey.Keys[1])
+		err = dasvid.VerifySignature(oauthtoken, pubkey.Keys[0])
 		if err != nil {
 
 			log.Fatalf("Error verifying OAuth signature: %v", err)
@@ -217,10 +217,11 @@ func MintHandler(w http.ResponseWriter, r *http.Request) {
 			token := dasvid.Mintdasvid(iss, sub, dpa, dpr, awprivatekey)
 
 			// Gen ZKP (Does it should be here??)
-			zkp := sha256.New()
-			zkp.Write([]byte(fmt.Sprintf("%v",token)))
-			log.Println("Generated ZKP: ", fmt.Sprintf("%x",zkp.Sum(nil)))
-
+			// zkp := sha256.New()
+			// zkp.Write([]byte(fmt.Sprintf("%v",token)))
+			// log.Println("Generated ZKP: ", fmt.Sprintf("%x",zkp.Sum(nil)))
+			zkp := dasvid.GenZKPproof(oauthtoken, pubkey.Keys[0])
+			fmt.Println("ZKP: ", zkp)
 			// Data to be returned in API 
 			Data = PocData{
 				OauthSigValidation: 		sigresult,
@@ -233,7 +234,7 @@ func MintHandler(w http.ResponseWriter, r *http.Request) {
 			Filetemp = FileContents{
 				OauthClaims:				tokenclaims,
 				DASVIDToken:	 			token,
-				ZKP:						fmt.Sprintf("%x",zkp.Sum(nil)),
+				// ZKP:						fmt.Sprintf("%x",zkp.Sum(nil)),
 			}
 
 			// Save token and ZKP (not implemented) in cache
