@@ -67,7 +67,7 @@ asn1Conf() { #input:hexStrPlainUpperCase
             -inform     DER                 \
             -outform    PEM                 \
             -in         /dev/stdin          \
-            -out        ./poclib/temp.pem
+            -out        ./keys/oauth.pem
     # sed       /^$/d=removeEmptyLines; /^ */=removeLeadingSpaces
 }
 

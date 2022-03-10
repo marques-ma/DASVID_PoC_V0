@@ -60,6 +60,8 @@ import (
 
 // Worload API socket path
 const socketPath = "unix:///tmp/spire-agent/public/api.sock"
+// set path to OAuth PEM public key file 
+const path = "./keys/oauth.pem"
 
 type SVID struct {
 	// ID is the SPIFFE ID of the X509-SVID.
@@ -356,15 +358,12 @@ func GenZKPproof(OAuthToken string, publickey JWK) int {
 
 	defer timeTrack(time.Now(), "Generate ZKP")
 
-	parts := strings.Split(OAuthToken, ".")
-
     var vkey *C.EVP_PKEY
-    
-	var bigN *C.BIGNUM
-	bigN = C.BN_new()
-    var bigE *C.BIGNUM
-	bigE = C.BN_new()
-    
+    var bigN, bigE, bigSig, bigMsg *C.BIGNUM
+    var filepem *C.FILE
+
+    parts := strings.Split(OAuthToken, ".")
+
     // extract token issuer
     tokenclaims := ParseTokenClaims(OAuthToken)
     issuer := fmt.Sprintf("%v", tokenclaims["iss"])
@@ -372,6 +371,7 @@ func GenZKPproof(OAuthToken string, publickey JWK) int {
     keyEndPoint := issuer+"/v1/keys"
 
     // Use script to convert jwk retrieved from OKTA endpoint to DER
+    // PEM file will be saved in ./keys/
     cmd := exec.Command("./poclib/jwk2der.sh", keyEndPoint)
     err := cmd.Run()
     if err != nil {
@@ -379,14 +379,12 @@ func GenZKPproof(OAuthToken string, publickey JWK) int {
     }
 
     // Open OAuth PEM file containing Public Key
-    var filepem *C.FILE
-    path := "./poclib/temp.pem"
     filepem = C.fopen((C.CString)(path),(C.CString)("r")) 
   
     // Load key from PEM file to VKEY
     C.PEM_read_PUBKEY(filepem, &vkey, nil, nil)
 
-    // Gen signature bignum
+    // Extract token signature and generate signature BIGNUM
 	signature, err := base64.RawURLEncoding.DecodeString(parts[2])
 	if err != nil {
 		log.Printf("Error collecting signature: %v", err)
@@ -394,18 +392,16 @@ func GenZKPproof(OAuthToken string, publickey JWK) int {
 	sig_len := len(signature)
 	sig_C := C.CBytes(signature)
 	defer C.free(unsafe.Pointer(sig_C))
-	var bigSig *C.BIGNUM
+	
 	bigSig = C.BN_new()
-
-    // Extract BIGNUM signature from token signature
 	C.rsa_sig_extract_bn(&bigSig, (*C.uchar)(sig_C), (C.size_t)(sig_len))
 
-	// Gen message Bignum
+	// Gen message BIGNUM
 	message := []byte(strings.Join(parts[0:2], "."))
 	msg_len := len(message)
 	msg_C := C.CBytes(message)
 	defer C.free(unsafe.Pointer(msg_C))
-	var bigMsg *C.BIGNUM
+	
 	bigMsg = C.BN_new()
 	bigmsgresult := C.rsa_msg_evp_extract_bn(&bigMsg, (*C.uchar)(msg_C), (C.uint)(msg_len), vkey)
 	if bigmsgresult != 1 {
@@ -413,10 +409,13 @@ func GenZKPproof(OAuthToken string, publickey JWK) int {
 	}
 
     // Extract bigN and bigE from VKEY
+    bigN = C.BN_new()
+	bigE = C.BN_new()
     C.rsa_vkey_extract_bn(&bigN, &bigE, vkey)
     C.EVP_PKEY_free(vkey)
 
-	// Generate message hash for debug purpose
+    // -=-=-=-=-= DEBUG -=-=-=-=-=-
+	// Generate message hash
     // hasher := crypto.SHA256.New()
 	// hasher.Write(message)
 	
@@ -434,6 +433,7 @@ func GenZKPproof(OAuthToken string, publickey JWK) int {
 	// fmt.Println("msg_size: ", (C.uint)(msg_len))
 	// fmt.Println("BigMSG: ")
 	// C.print_bn(bigMsg)	
+    // -=-=-=-=-=-=-=-=-=-=-=-=-=-=- 
 
     // Verify signature correctness 
 	sigver := C.rsa_bn_ver(bigSig, bigMsg, bigN, bigE)
@@ -450,13 +450,15 @@ func GenZKPproof(OAuthToken string, publickey JWK) int {
         log.Printf("Error creating proof\n")
     }
 
-	// fmt.Println("Proof sucessfully created")
+	// -=-=-=- DEBUG -=-=-=-=-
+    // fmt.Println("Proof sucessfully created")
 	// fmt.Println("proof: ", proof)
 	// fmt.Println("proof length: ", int(proof.len))
 	// fmt.Println("proof p: ")
 	// C.print_bn(*proof.p)
 	// fmt.Println("proof c: ")
 	// C.print_bn(*proof.c)
+    // -=-=-=-=-=-=-=-=-=-=-=-
 
 	// Check proof correctness
 	verification := C.rsa_sig_proof_ver(proof, bigMsg, bigE, bigN)
