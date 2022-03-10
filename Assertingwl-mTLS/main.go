@@ -27,7 +27,7 @@ import (
 )
 
 type FileContents struct {
-	OauthClaims					map[string]interface{} `json:",omitempty"`
+	OauthToken					string `json:",omitempty"`
 	DASVIDToken					string `json:",omitempty"`
 	ZKP							string `json:",omitempty"`
 }
@@ -146,7 +146,7 @@ func MintHandler(w http.ResponseWriter, r *http.Request) {
 		// Google endpoint:
 		// https://www.googleapis.com/oauth2/v3/certs
 
-		fmt.Println("OAuth Issuer: ", tokenclaims["iss"])
+		log.Println("OAuth Issuer: ", tokenclaims["iss"])
 		issuer := fmt.Sprintf("%v", tokenclaims["iss"])
 		var uri string
 
@@ -216,11 +216,11 @@ func MintHandler(w http.ResponseWriter, r *http.Request) {
 			token := dasvid.Mintdasvid(iss, sub, dpa, dpr, awprivatekey)
 
 			// Gen ZKP (Does it should be here??)
-			// zkp := sha256.New()
-			// zkp.Write([]byte(fmt.Sprintf("%v",token)))
-			// log.Println("Generated ZKP: ", fmt.Sprintf("%x",zkp.Sum(nil)))
 			zkp := dasvid.GenZKPproof(oauthtoken, pubkey.Keys[0])
-			fmt.Println("ZKP: ", zkp)
+			if zkp != 1 {
+				log.Println("Error generating ZKP proof")
+			}
+			// fmt.Println("ZKP: ", zkp)
 			// Data to be returned in API 
 			Data = PocData{
 				OauthSigValidation: 		sigresult,
@@ -231,7 +231,7 @@ func MintHandler(w http.ResponseWriter, r *http.Request) {
 
 			// Data to be write in cache file
 			Filetemp = FileContents{
-				OauthClaims:				tokenclaims,
+				OauthToken:					oauthtoken,
 				DASVIDToken:	 			token,
 				// ZKP:						fmt.Sprintf("%x",zkp.Sum(nil)),
 			}
