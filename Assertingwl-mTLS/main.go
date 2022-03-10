@@ -71,7 +71,7 @@ func main() {
 	// Create a `workloadapi.X509Source`, it will connect to Workload API using provided socket.
 	source, err := workloadapi.NewX509Source(ctx, workloadapi.WithClientOptions(workloadapi.WithAddr(socketPath)))
 	if err != nil {
-		log.Fatalf("Unable to create X509Source: %v", err)
+		log.Printf("Unable to create X509Source: %v", err)
 	}
 	defer source.Close()
 
@@ -87,7 +87,7 @@ func main() {
 	
 	log.Printf("Start serving API...")
 	if err := server.ListenAndServeTLS("", ""); err != nil {
-		log.Fatalf("Error on serve: %v", err)
+		log.Printf("Error on serve: %v", err)
 	}
 	
 }
@@ -107,7 +107,6 @@ func MintHandler(w http.ResponseWriter, r *http.Request) {
 	// TODO
 	//  validate if oauth token issuer is known
 
-	// performance stats
 	defer timeTrack(time.Now(), "Mint")
 
 	sigresult := new(bool)
@@ -118,7 +117,7 @@ func MintHandler(w http.ResponseWriter, r *http.Request) {
 
 	clientspiffeid, err := x509svid.IDFromCert(certs[0])
 	if err != nil {
-		log.Fatalf("Error retrieving client SPIFFE-ID from mTLS connection %v", err)
+		log.Printf("Error retrieving client SPIFFE-ID from mTLS connection %v", err)
 	}
 	log.Printf("Client SPIFFE-ID: %v", clientspiffeid)
 
@@ -170,14 +169,14 @@ func MintHandler(w http.ResponseWriter, r *http.Request) {
 		// If the file exists it reuse or overwrite? It could be an old key...
 		out, err := os.Create("./data/oauthjwkskey.cache")
 		if err != nil {
-			log.Fatalf("Error creating Oauth public key cache file: %v", err)
+			log.Printf("Error creating Oauth public key cache file: %v", err)
 		}
 		defer out.Close()
 		io.Copy(out, resp.Body)
 
 		// Read key from cache file
 		pubkey := dasvid.RetrieveJWKSPublicKey("./data/oauthjwkskey.cache")
-		fmt.Println("Pubkey in main", pubkey.Keys[0])
+		// fmt.Println("Pubkey in main", pubkey.Keys[0])
 
 		// Verify token signature using extracted Public key
 		// //////////////////////////////////
@@ -186,7 +185,7 @@ func MintHandler(w http.ResponseWriter, r *http.Request) {
 		err = dasvid.VerifySignature(oauthtoken, pubkey.Keys[0])
 		if err != nil {
 
-			log.Fatalf("Error verifying OAuth signature: %v", err)
+			log.Printf("Error verifying OAuth signature: %v", err)
 			*sigresult = false
 
 			Data = PocData{
@@ -312,7 +311,7 @@ func IntrospectHandler(w http.ResponseWriter, r *http.Request) {
 
 		json.Unmarshal([]byte(scanner.Text()), &Filetemp)
 		if err != nil {
-			log.Fatalf("error:", err)
+			log.Printf("error:", err)
 		}
 		
 		if Filetemp.DASVIDToken == datoken {

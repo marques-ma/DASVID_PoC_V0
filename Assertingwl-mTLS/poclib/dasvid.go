@@ -13,9 +13,9 @@ package dasvid
 #include "rsa_bn_sig.h"
 #include "rsa_sig_proof_util.h"
 
-#cgo CFLAGS: -g -Wall -m64 -I${SRCDIR}/src
+#cgo CFLAGS: -g -Wall -m64 -I${SRCDIR}
 #cgo pkg-config: --static libssl libcrypto
-#cgo LDFLAGS: -L${SRCDIR}/src
+#cgo LDFLAGS: -L${SRCDIR}
 
 */
 import "C"
@@ -38,6 +38,7 @@ import (
 
 	"time"
 	"os"
+    "os/exec"
 	"encoding/json"
 		
 	// // to retrieve PrivateKey
@@ -165,7 +166,7 @@ func Mintdasvid(iss string, sub string, dpa string, dpr string, key interface{})
 	// Sign Token
  	tokenString, err := token.SignedString(key)
  	if err != nil {
- 		log.Fatalf("Error generating JWT: %v", err)
+        log.Printf("Error generating JWT: %v", err)
 	}
  
 	return tokenString
@@ -178,7 +179,7 @@ func ParseTokenClaims(strAT string) map[string]interface{} {
 		// Parse access token without validating signature
 		token, _, err := new(mint.Parser).ParseUnverified(strAT, mint.MapClaims{})
 		if err != nil {
-			log.Fatalf("Error parsing JWT claims: %v", err)
+			log.Printf("Error parsing JWT claims: %v", err)
 		}
 		claims, _ := token.Claims.(mint.MapClaims)
 		
@@ -208,7 +209,7 @@ func RetrievePrivateKey(path string) interface{} {
 	// Open file containing private Key
 	privateKeyFile, err := os.Open(path)
 	if err != nil {
-		log.Fatalf("Error opening private key file: %v", err)
+		log.Printf("Error opening private key file: %v", err)
 	}
 
 	pemfileinfo, _ := privateKeyFile.Stat()
@@ -223,7 +224,7 @@ func RetrievePrivateKey(path string) interface{} {
 	// updated to use RSA since key used will not be fetched from SPIRE
 	privateKeyImported, err := x509.ParsePKCS1PrivateKey(pemdata.Bytes)
 	if err != nil {
-		log.Fatalf("Error parsing private key: %v", err)
+		log.Printf("Error parsing private key: %v", err)
 	}
 	return privateKeyImported
 }
@@ -253,11 +254,11 @@ func RetrievePEMPublicKey(path string) interface{} {
 	case "PUBLIC KEY":
 		publicKey, err = x509.ParsePKIXPublicKey(block.Bytes)
 		if err != nil {
-			fmt.Println("error", err)
+			log.Printf("error", err)
 		}
 		
 	default:
-		fmt.Println("Unsupported key type %q", block.Type)
+		log.Printf("Unsupported key type %q", block.Type)
 	}
 
 	// Return raw public key (N and E) (PEM)
@@ -274,7 +275,7 @@ func RetrieveDERPublicKey(path string) []byte {
 	// Open file containing public Key
 	publicKeyFile, err := os.Open(path)
 	if err != nil {
-		log.Fatalf("Error opening public key file: %v", err)
+		log.Printf("Error opening public key file: %v", err)
 	}
 
 	pemfileinfo, _ := publicKeyFile.Stat()
@@ -294,11 +295,11 @@ func RetrieveDERPublicKey(path string) []byte {
 	case "PUBLIC KEY":
 		publicKey, err = x509.ParsePKIXPublicKey(block.Bytes)
 		if err != nil {
-			fmt.Println("error", err)
+			log.Printf("error", err)
 		}
 		
 	default:
-		fmt.Println("Unsupported key type %q", block.Type)
+		log.Printf("Unsupported key type %q", block.Type)
 	}
 
 	// Return raw public key (N and E) (PEM)
@@ -306,7 +307,7 @@ func RetrieveDERPublicKey(path string) []byte {
 
 	// Return DER
 	marshpubic, _ := x509.MarshalPKIXPublicKey(publicKey)
-    fmt.Println("Success returning DER: ", marshpubic)
+    // log.Printf("Success returning DER: ", marshpubic)
 	return marshpubic 
 }
 
@@ -315,7 +316,7 @@ func RetrieveJWKSPublicKey(path string) JWKS {
 	// NOTE: Needs to implement cache and retrieve processes
 	jwksFile, err := os.Open(path)
 	if err != nil {
-		log.Fatalf("Error reading jwks file: %v", err)
+		log.Printf("Error reading jwks file: %v", err)
 	}
 
 	// Decode file and retrieve Public key from Okta application
@@ -323,7 +324,7 @@ func RetrieveJWKSPublicKey(path string) JWKS {
 	var jwks JWKS
 	
 	if err := dec.Decode(&jwks); err != nil {
-		log.Fatalf("Unable to read key: %s", err)
+		log.Printf("Unable to read key: %s", err)
 	}
 
 	return jwks
@@ -339,13 +340,13 @@ func FetchX509SVID() *x509svid.SVID {
 	// Create a `workloadapi.X509Source`, it will connect to Workload API using provided socket.
 	source, err := workloadapi.NewX509Source(ctx, workloadapi.WithClientOptions(workloadapi.WithAddr(socketPath)))
 	if err != nil {
-		log.Fatalf("Unable to create X509Source: %v", err)
+		log.Printf("Unable to create X509Source: %v", err)
 	}
 	defer source.Close()
 
 	svid, err := source.GetX509SVID()
 	if err != nil {
-		log.Fatalf("Unable to fetch SVID: %v", err)
+		log.Printf("Unable to fetch SVID: %v", err)
 	}
 
 	return svid
@@ -364,22 +365,39 @@ func GenZKPproof(OAuthToken string, publickey JWK) int {
     var bigE *C.BIGNUM
 	bigE = C.BN_new()
     
+    // extract token issuer
+    tokenclaims := ParseTokenClaims(OAuthToken)
+    issuer := fmt.Sprintf("%v", tokenclaims["iss"])
+    // Considering its OKTA based solution, add /keys endpoint
+    keyEndPoint := issuer+"/v1/keys"
+
+    // Use script to convert jwk retrieved from OKTA endpoint to DER
+    cmd := exec.Command("./poclib/jwk2der.sh", keyEndPoint)
+    err := cmd.Run()
+    if err != nil {
+        log.Fatal(err)
+    }
+
+    // Open OAuth PEM file containing Public Key
     var filepem *C.FILE
-    path := "./poclib/temp.der"
+    path := "./poclib/temp.pem"
     filepem = C.fopen((C.CString)(path),(C.CString)("r")) 
   
+    // Load key from PEM file to VKEY
     C.PEM_read_PUBKEY(filepem, &vkey, nil, nil)
 
     // Gen signature bignum
 	signature, err := base64.RawURLEncoding.DecodeString(parts[2])
 	if err != nil {
-		log.Fatalf("Error collecting signature: %v", err)
+		log.Printf("Error collecting signature: %v", err)
 	}
 	sig_len := len(signature)
 	sig_C := C.CBytes(signature)
 	defer C.free(unsafe.Pointer(sig_C))
 	var bigSig *C.BIGNUM
 	bigSig = C.BN_new()
+
+    // Extract BIGNUM signature from token signature
 	C.rsa_sig_extract_bn(&bigSig, (*C.uchar)(sig_C), (C.size_t)(sig_len))
 
 	// Gen message Bignum
@@ -391,65 +409,67 @@ func GenZKPproof(OAuthToken string, publickey JWK) int {
 	bigMsg = C.BN_new()
 	bigmsgresult := C.rsa_msg_evp_extract_bn(&bigMsg, (*C.uchar)(msg_C), (C.uint)(msg_len), vkey)
 	if bigmsgresult != 1 {
-		fmt.Printf("Error generating bigMSG")
+		log.Printf("Error generating bigMSG")
 	}
 
+    // Extract bigN and bigE from VKEY
     C.rsa_vkey_extract_bn(&bigN, &bigE, vkey)
+    C.EVP_PKEY_free(vkey)
 
-	hasher := crypto.SHA256.New()
-	hasher.Write(message)
+	// Generate message hash for debug purpose
+    // hasher := crypto.SHA256.New()
+	// hasher.Write(message)
 	
-	fmt.Println("\n*** Input data ***")
-	fmt.Println("BigN: ")
-	C.print_bn(bigN)
-	fmt.Println("BigE: ")
-	C.print_bn(bigE)
-	fmt.Println("\nsig: ", signature)
-	fmt.Println("sig_size: ", sig_len)
-	fmt.Println("bigSig: ")
-	C.print_bn(bigSig)	
-	fmt.Println("message hash:  ", fmt.Sprintf("%x",hasher.Sum(nil)))
-	fmt.Println("\nmessage: ", string(message))
-	fmt.Println("msg_size: ", (C.uint)(msg_len))
-	fmt.Println("BigMSG: ")
-	C.print_bn(bigMsg)	
+	// fmt.Println("\n*** Input data ***")
+	// fmt.Println("BigN: ")
+	// C.print_bn(bigN)
+	// fmt.Println("BigE: ")
+	// C.print_bn(bigE)
+	// fmt.Println("\nsig: ", signature)
+	// fmt.Println("sig_size: ", sig_len)
+	// fmt.Println("bigSig: ")
+	// C.print_bn(bigSig)	
+	// fmt.Println("message hash:  ", fmt.Sprintf("%x",hasher.Sum(nil)))
+	// fmt.Println("\nmessage: ", string(message))
+	// fmt.Println("msg_size: ", (C.uint)(msg_len))
+	// fmt.Println("BigMSG: ")
+	// C.print_bn(bigMsg)	
 
+    // Verify signature correctness 
 	sigver := C.rsa_bn_ver(bigSig, bigMsg, bigN, bigE)
 	if( sigver == 0) {
-        fmt.Println("Error in signature verification\n")
+        log.Printf("Error in signature verification\n")
     }
 	if( sigver == 1) {
-        fmt.Println("Signature verification success!\n")
+        log.Printf("Signature verification success!\n")
     }
 
+    // Generate Zero Knowledge Proof
 	proof := C.rsa_sig_proof_prove(2048, 128, bigSig, bigE, bigN)
-    
     if( proof == nil) {
-        log.Fatal("Error creating proof\n")
+        log.Printf("Error creating proof\n")
     }
 
-	fmt.Println("Proof sucessfully created")
-	fmt.Println("proof: ", proof)
-	fmt.Println("proof length: ", int(proof.len))
-	fmt.Println("proof p: ")
-	C.print_bn(*proof.p)
-	fmt.Println("proof c: ")
-	C.print_bn(*proof.c)
+	// fmt.Println("Proof sucessfully created")
+	// fmt.Println("proof: ", proof)
+	// fmt.Println("proof length: ", int(proof.len))
+	// fmt.Println("proof p: ")
+	// C.print_bn(*proof.p)
+	// fmt.Println("proof c: ")
+	// C.print_bn(*proof.c)
 
-	
-	// verification := C.rsa_evp_sig_proof_ver(proof, pmsg, (C.uint)(msg_len), key)
+	// Check proof correctness
 	verification := C.rsa_sig_proof_ver(proof, bigMsg, bigE, bigN)
-    fmt.Println("Verification result: ", verification)
-    
-    C.EVP_PKEY_free(vkey);
-    
+    var ret int
     if( verification == 1) {
-        log.Printf("Success verifying proof!!! :DDDD \n")
-		return 1
-    } else {
+        log.Printf("Success verifying proof!!! :DD \n")
+		ret = 1
+    } else if( verification == 0) {
 		log.Printf("Failed verifying proof :(( \n")
-		return 0
-	}
-
-
+		ret = 0
+	} else if( verification == -1) {
+        log.Printf("Error verifying proof :(( \n")
+		ret = -1
+    }
+    return ret
 }

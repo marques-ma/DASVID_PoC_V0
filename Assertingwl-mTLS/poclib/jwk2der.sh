@@ -67,7 +67,7 @@ asn1Conf() { #input:hexStrPlainUpperCase
             -inform     DER                 \
             -outform    PEM                 \
             -in         /dev/stdin          \
-            -out        ./temp.der
+            -out        ./poclib/temp.pem
     # sed       /^$/d=removeEmptyLines; /^ */=removeLeadingSpaces
 }
 
@@ -87,5 +87,5 @@ main() {
 }
 
 # MAIN
-main 'https://dev-39567105.okta.com/oauth2/default/v1/keys'
+main ''$1''
 exit 0
