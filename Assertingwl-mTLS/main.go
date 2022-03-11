@@ -1,4 +1,23 @@
 package main
+/*
+#include <string.h>
+#include <openssl/crypto.h>
+#include <openssl/bn.h>
+#include <openssl/rsa.h>
+#include <openssl/evp.h>
+#include <openssl/err.h>
+#include <openssl/pem.h>
+#include <openssl/x509.h>
+#include "./poclib/rsa_sig_proof.h"
+#include "./poclib/rsa_bn_sig.h"
+#include "./poclib/rsa_sig_proof_util.h"
+
+#cgo CFLAGS: -g -Wall -m64 -I${SRCDIR}
+#cgo pkg-config: --static libssl libcrypto
+#cgo LDFLAGS: -L${SRCDIR}
+
+*/
+import "C"
 
 import (
 	
@@ -27,9 +46,9 @@ import (
 )
 
 type FileContents struct {
-	OauthToken					string `json:",omitempty"`
-	DASVIDToken					string `json:",omitempty"`
-	ZKP							string `json:",omitempty"`
+	OauthToken					string `json:OauthToken",omitempty"`
+	DASVIDToken					string `json:DASVIDToken",omitempty"`
+	ZKP							string `json:ZKP",omitempty"`
 }
 
 type PocData struct {
@@ -215,12 +234,25 @@ func MintHandler(w http.ResponseWriter, r *http.Request) {
 			// Generate DASVID
 			token := dasvid.Mintdasvid(iss, sub, dpa, dpr, awprivatekey)
 
-			// Gen ZKP (Does it should be here??)
+			// Gen ZKP
 			zkp := dasvid.GenZKPproof(oauthtoken, pubkey.Keys[0])
-			if zkp != 1 {
+			if zkp == "" {
 				log.Println("Error generating ZKP proof")
 			}
-			// fmt.Println("ZKP: ", zkp)
+			// cvtzkp := (*C.rsa_sig_proof_t)(unsafe.Pointer(zkp))
+
+			fmt.Println("Proof sucessfully created")
+			fmt.Println("proof message: ", zkp)
+			// fmt.Println("proof length: ", int(cvtzkp.len))
+			// fmt.Println("proof p: ")
+			// C.print_bn(*cvtzkp.p)
+			// fmt.Println("proof c: ")
+			// C.print_bn(*cvtzkp.c)			
+
+			// rcvdb64, _ := dasvid.EncodeToBase64(cvtzkp.p)
+			// printproof, err := base64.RawURLEncoding.DecodeString(rcvdb64)
+			// fmt.Println(printproof)
+
 			// Data to be returned in API 
 			Data = PocData{
 				OauthSigValidation: 		sigresult,
@@ -233,8 +265,15 @@ func MintHandler(w http.ResponseWriter, r *http.Request) {
 			Filetemp = FileContents{
 				OauthToken:					oauthtoken,
 				DASVIDToken:	 			token,
-				// ZKP:						fmt.Sprintf("%x",zkp.Sum(nil)),
+				ZKP:						zkp,
 			}
+			
+			// About ZKP format:
+			// 
+			// proof = {length, bigP, bigC}
+			// to save to file or inside DASVID
+			// convert bigP and bigC to hex
+			// 
 
 			// Save token and ZKP (not implemented) in cache
 			// If the file doesn't exist, create it, or append to the file
@@ -325,3 +364,4 @@ func IntrospectHandler(w http.ResponseWriter, r *http.Request) {
     }
 	json.NewEncoder(w).Encode("DASVID not found")
 }
+

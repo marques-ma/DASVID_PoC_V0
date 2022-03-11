@@ -7,7 +7,6 @@ package dasvid
 #include <openssl/evp.h>
 #include <openssl/err.h>
 #include <openssl/pem.h>
-#include <openssl/bio.h>
 #include <openssl/x509.h>
 #include "rsa_sig_proof.h"
 #include "rsa_bn_sig.h"
@@ -266,10 +265,6 @@ func RetrievePEMPublicKey(path string) interface{} {
 	// Return raw public key (N and E) (PEM)
 	return publicKey
 
-	// Return DER
-	// marshpubic, _ := x509.MarshalPKIXPublicKey(publicKey)
-    // fmt.Println("Success returning DER: %x",marshpubic)
-	// return marshpubic 
 }
 
 func RetrieveDERPublicKey(path string) []byte {
@@ -289,7 +284,6 @@ func RetrieveDERPublicKey(path string) []byte {
 	block, _ := pem.Decode(pembytes)
 	if block == nil {
 		log.Printf("No key found: %v", err)
-		// os.Exit(1)
 	}
 
 	var publicKey interface{}
@@ -303,9 +297,6 @@ func RetrieveDERPublicKey(path string) []byte {
 	default:
 		log.Printf("Unsupported key type %q", block.Type)
 	}
-
-	// Return raw public key (N and E) (PEM)
-	// return []byte(fmt.Sprint(publicKey))
 
 	// Return DER
 	marshpubic, _ := x509.MarshalPKIXPublicKey(publicKey)
@@ -354,7 +345,7 @@ func FetchX509SVID() *x509svid.SVID {
 	return svid
 }
 
-func GenZKPproof(OAuthToken string, publickey JWK) int {
+func GenZKPproof(OAuthToken string, publickey JWK) string {
 
 	defer timeTrack(time.Now(), "Generate ZKP")
 
@@ -449,6 +440,30 @@ func GenZKPproof(OAuthToken string, publickey JWK) int {
     if( proof == nil) {
         log.Printf("Error creating proof\n")
     }
+	
+	// Check proof correctness
+	verification := C.rsa_sig_proof_ver(proof, bigMsg, bigE, bigN)
+    // var ret int
+    if( verification == 1) {
+        log.Printf("Success verifying proof!!! :DD \n")
+		// ret = 1
+    } else if( verification == 0) {
+		log.Printf("Failed verifying proof :(( \n")
+		// ret = 0
+	} else if( verification == -1) {
+        log.Printf("Error verifying proof :(( \n")
+		// ret = -1
+    }
+	
+	// Gen base64 representation
+	hexproofP := C.BN_bn2hex(*proof.p)
+	hexproofC := C.BN_bn2hex(*proof.c)
+	separator := "."
+	hexproof := fmt.Sprint(proof.len) + separator + fmt.Sprintf("%x", hexproofP) + separator + fmt.Sprintf("%x", hexproofC)
+	b64hexproof, err := EncodeToBase64(hexproof)
+	if err != nil {
+		log.Printf("Error generating b64 hexproof: ", err)
+	}
 
 	// -=-=-=- DEBUG -=-=-=-=-
     // fmt.Println("Proof sucessfully created")
@@ -458,20 +473,21 @@ func GenZKPproof(OAuthToken string, publickey JWK) int {
 	// C.print_bn(*proof.p)
 	// fmt.Println("proof c: ")
 	// C.print_bn(*proof.c)
+	fmt.Printf("hexproof p: %x\n", hexproofP)
+	fmt.Printf("hexproof c: %x\n", hexproofC)
+	fmt.Printf("responsemodel: %v", b64hexproof)
     // -=-=-=-=-=-=-=-=-=-=-=-
 
-	// Check proof correctness
-	verification := C.rsa_sig_proof_ver(proof, bigMsg, bigE, bigN)
-    var ret int
-    if( verification == 1) {
-        log.Printf("Success verifying proof!!! :DD \n")
-		ret = 1
-    } else if( verification == 0) {
-		log.Printf("Failed verifying proof :(( \n")
-		ret = 0
-	} else if( verification == -1) {
-        log.Printf("Error verifying proof :(( \n")
-		ret = -1
+    return b64hexproof
+}
+
+func EncodeToBase64(v interface{}) (string, error) {
+    var buf bytes.Buffer
+    encoder := base64.NewEncoder(base64.StdEncoding, &buf)
+    err := json.NewEncoder(encoder).Encode(v)
+    if err != nil {
+        return "", err
     }
-    return ret
+    encoder.Close()
+    return buf.String(), nil
 }
