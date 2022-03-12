@@ -21,6 +21,7 @@ import "C"
 
 import (
 	
+	"strings"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -39,9 +40,6 @@ import (
 	
 	// dasvid lib
 	dasvid "github.com/marco-developer/dasvid/poclib"
-
-	// To generate a sample ZKP response
-	// "crypto/sha256"
 
 )
 
@@ -179,10 +177,9 @@ func MintHandler(w http.ResponseWriter, r *http.Request) {
 			uri = issuer+"/v1/keys"	
 		}
 		
+		// Retrieve and save OAuth JWKS public key in cache file
 		resp, err := http.Get(uri)
-	
 		defer resp.Body.Close()
-
 		// Save response in cache file
 		// TODO:
 		// If the file exists it reuse or overwrite? It could be an old key...
@@ -219,39 +216,43 @@ func MintHandler(w http.ResponseWriter, r *http.Request) {
 
 			*sigresult = true
 			
+			parts := strings.Split(oauthtoken, ".")
+			oauthmsg := strings.Join(parts[0:2], ".")
+
 			// Fetch Asserting workload SVID to use as DASVID issuer
 			assertingwl := dasvid.FetchX509SVID()
+
+			// Gen ZKP
+			// About ZKP format:
+			// received proof = base64(length.hexa(proof.p).hexa(proof.c))
+			// 
+			// validation: 
+			// - extract proof bignums with BN_hex2bn
+			// - recreate the proof in rsa_sig_proof_t data type 
+			// - Generate vkey from public key
+			// - extract bigN and bigE from vkey
+			// - generate bigSignature from signature
+			// - rsa_sig_proof_ver(proof, bigMsg, bigE, bigN)
+			// 
+			zkp := dasvid.GenZKPproof(oauthtoken, pubkey.Keys[0])
+			if zkp == "" {
+				log.Println("Error generating ZKP proof")
+			}
+
+			fmt.Println("Proof sucessfully created")
+			fmt.Println("proof message: ", zkp)
 
 			// Generate DASVID claims
 			iss := assertingwl.ID.String()
 			sub := clientspiffeid.String()
-			dpa := fmt.Sprintf("%v", tokenclaims["iss"])
+			dpa := fmt.Sprintf("%v", issuer)
 			dpr := fmt.Sprintf("%v", tokenclaims["sub"])
 
 			// Load private key from pem file used to sign DASVID
 			awprivatekey := dasvid.RetrievePrivateKey("./keys/key.pem")
 
 			// Generate DASVID
-			token := dasvid.Mintdasvid(iss, sub, dpa, dpr, awprivatekey)
-
-			// Gen ZKP
-			zkp := dasvid.GenZKPproof(oauthtoken, pubkey.Keys[0])
-			if zkp == "" {
-				log.Println("Error generating ZKP proof")
-			}
-			// cvtzkp := (*C.rsa_sig_proof_t)(unsafe.Pointer(zkp))
-
-			fmt.Println("Proof sucessfully created")
-			fmt.Println("proof message: ", zkp)
-			// fmt.Println("proof length: ", int(cvtzkp.len))
-			// fmt.Println("proof p: ")
-			// C.print_bn(*cvtzkp.p)
-			// fmt.Println("proof c: ")
-			// C.print_bn(*cvtzkp.c)			
-
-			// rcvdb64, _ := dasvid.EncodeToBase64(cvtzkp.p)
-			// printproof, err := base64.RawURLEncoding.DecodeString(rcvdb64)
-			// fmt.Println(printproof)
+			token := dasvid.Mintdasvid(iss, sub, dpa, dpr, oauthmsg, zkp, awprivatekey)
 
 			// Data to be returned in API 
 			Data = PocData{
@@ -268,13 +269,6 @@ func MintHandler(w http.ResponseWriter, r *http.Request) {
 				ZKP:						zkp,
 			}
 			
-			// About ZKP format:
-			// 
-			// proof = {length, bigP, bigC}
-			// to save to file or inside DASVID
-			// convert bigP and bigC to hex
-			// 
-
 			// Save token and ZKP (not implemented) in cache
 			// If the file doesn't exist, create it, or append to the file
 			f, err := os.OpenFile("./data/dasvid.data", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)

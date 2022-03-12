@@ -58,9 +58,13 @@ import (
 )
 
 // Worload API socket path
-const socketPath = "unix:///tmp/spire-agent/public/api.sock"
-// set path to OAuth PEM public key file 
-const path = "./keys/oauth.pem"
+const (
+	socketPath 	= "unix:///tmp/spire-agent/public/api.sock"
+	// set path to OAuth PEM public key file 
+	path 		= "./keys/oauth.pem"
+	//  proof_len The number of components in the proof.
+	proof_len 	= 128
+)
 
 type SVID struct {
 	// ID is the SPIFFE ID of the X509-SVID.
@@ -135,7 +139,7 @@ func VerifySignature(jwtToken string, key JWK) error {
 	return err
 }
 
-func Mintdasvid(iss string, sub string, dpa string, dpr string, key interface{}) string{
+func Mintdasvid(iss string, sub string, dpa string, dpr string, oauthmsg string, zkp string, key interface{}) string{
 
 	flag.CommandLine = flag.NewFlagSet(os.Args[0], flag.ExitOnError)
 
@@ -150,6 +154,8 @@ func Mintdasvid(iss string, sub string, dpa string, dpr string, key interface{})
 	subj := flag.String("sub", sub, "subject (sub) = the identity about which the assertion is being made. Subject workload's SPIFFE ID.")
 	dlpa := flag.String("dpa", dpa, "delegated authority (dpa) = ")
 	dlpr := flag.String("dpr", dpr, "delegated principal (dpr) = The Principal")
+	oam  := flag.String("oam", oauthmsg, "Oauth token without signature part")
+	proof := flag.String("zkp", zkp, "OAuth Zero-Knowledge-Proof")
  
 	flag.Parse()
  
@@ -161,6 +167,11 @@ func Mintdasvid(iss string, sub string, dpa string, dpr string, key interface{})
 		"sub": *subj,
 		"dpa": *dlpa,
 		"dpr": *dlpr,
+		"zkp": map[string]interface{}{ 
+			"msg": oam,
+			"proof": proof,
+		},
+		
 		"iat": issue_time,
 	})
  
@@ -346,7 +357,6 @@ func FetchX509SVID() *x509svid.SVID {
 }
 
 func GenZKPproof(OAuthToken string, publickey JWK) string {
-
 	defer timeTrack(time.Now(), "Generate ZKP")
 
     var vkey *C.EVP_PKEY
@@ -354,15 +364,17 @@ func GenZKPproof(OAuthToken string, publickey JWK) string {
     var filepem *C.FILE
 
     parts := strings.Split(OAuthToken, ".")
-
-    // extract token issuer
+	
+    // extract token issuer and generate path to /keys endpoint
     tokenclaims := ParseTokenClaims(OAuthToken)
     issuer := fmt.Sprintf("%v", tokenclaims["iss"])
     // Considering its OKTA based solution, add /keys endpoint
+	// TODO:
+	// ADD support for google tokens as done in main.go
     keyEndPoint := issuer+"/v1/keys"
 
-    // Use script to convert jwk retrieved from OKTA endpoint to DER
-    // PEM file will be saved in ./keys/
+    // Use script to convert jwk retrieved from OKTA endpoint to 
+    // PEM file and save in ./keys/
     cmd := exec.Command("./poclib/jwk2der.sh", keyEndPoint)
     err := cmd.Run()
     if err != nil {
@@ -375,7 +387,7 @@ func GenZKPproof(OAuthToken string, publickey JWK) string {
     // Load key from PEM file to VKEY
     C.PEM_read_PUBKEY(filepem, &vkey, nil, nil)
 
-    // Extract token signature and generate signature BIGNUM
+    // Extract token signature, its length and allocate sig_C
 	signature, err := base64.RawURLEncoding.DecodeString(parts[2])
 	if err != nil {
 		log.Printf("Error collecting signature: %v", err)
@@ -384,6 +396,7 @@ func GenZKPproof(OAuthToken string, publickey JWK) string {
 	sig_C := C.CBytes(signature)
 	defer C.free(unsafe.Pointer(sig_C))
 	
+	// Generate signature BIGNUM
 	bigSig = C.BN_new()
 	C.rsa_sig_extract_bn(&bigSig, (*C.uchar)(sig_C), (C.size_t)(sig_len))
 
@@ -403,7 +416,7 @@ func GenZKPproof(OAuthToken string, publickey JWK) string {
     bigN = C.BN_new()
 	bigE = C.BN_new()
     C.rsa_vkey_extract_bn(&bigN, &bigE, vkey)
-    C.EVP_PKEY_free(vkey)
+    
 
     // -=-=-=-=-= DEBUG -=-=-=-=-=-
 	// Generate message hash
@@ -427,6 +440,7 @@ func GenZKPproof(OAuthToken string, publickey JWK) string {
     // -=-=-=-=-=-=-=-=-=-=-=-=-=-=- 
 
     // Verify signature correctness 
+	// alterar os hardcoded tipo 0 1
 	sigver := C.rsa_bn_ver(bigSig, bigMsg, bigN, bigE)
 	if( sigver == 0) {
         log.Printf("Error in signature verification\n")
@@ -436,7 +450,8 @@ func GenZKPproof(OAuthToken string, publickey JWK) string {
     }
 
     // Generate Zero Knowledge Proof
-	proof := C.rsa_sig_proof_prove(2048, 128, bigSig, bigE, bigN)
+	//  definir constantes ao inves de 2048 etc...
+	proof := C.rsa_sig_proof_prove((C.int)(sig_len*8), proof_len, bigSig, bigE, bigN)
     if( proof == nil) {
         log.Printf("Error creating proof\n")
     }
@@ -455,30 +470,110 @@ func GenZKPproof(OAuthToken string, publickey JWK) string {
 		// ret = -1
     }
 	
+	sigproof := C.rsa_evp_sig_proof_ver(proof, (*C.uchar)(msg_C), (C.uint)(msg_len), vkey)
+	if( sigproof == 1) {
+        log.Printf("Success verifying sigproof!!! :DD \n")
+		// ret = 1
+    } else {
+		log.Printf("Failed verifying sigproof :(( \n")
+		// ret = 0
+	}
 	// Gen base64 representation
 	hexproofP := C.BN_bn2hex(*proof.p)
+	defer C.free(unsafe.Pointer(hexproofP))
 	hexproofC := C.BN_bn2hex(*proof.c)
+	defer C.free(unsafe.Pointer(hexproofC))
+
+	gohexproofP := C.GoString(hexproofP)
+	gohexproofC := C.GoString(hexproofC)
+
 	separator := "."
-	hexproof := fmt.Sprint(proof.len) + separator + fmt.Sprintf("%x", hexproofP) + separator + fmt.Sprintf("%x", hexproofC)
-	b64hexproof, err := EncodeToBase64(hexproof)
-	if err != nil {
-		log.Printf("Error generating b64 hexproof: ", err)
-	}
+	// hexproof = length.P.C
+	hexproof := fmt.Sprint(proof.len) + separator + gohexproofP + separator + gohexproofC
+
+	// Reconstruct proof from hexproof and test it
+	var anotherproof *C.rsa_sig_proof_t
+	anotherproof = C.rsa_sig_proof_new(proof_len)
+	
+	receivedproof := VerifyHexProof(hexproof)
+	anotherproof.len = (C.int)(proof_len)
+	C.BN_copy(*anotherproof.p, *receivedproof.p)
+	C.BN_copy(*anotherproof.c, *receivedproof.c)
+
 
 	// -=-=-=- DEBUG -=-=-=-=-
     // fmt.Println("Proof sucessfully created")
 	// fmt.Println("proof: ", proof)
 	// fmt.Println("proof length: ", int(proof.len))
-	// fmt.Println("proof p: ")
-	// C.print_bn(*proof.p)
+	fmt.Println("proof p: ")
+	C.print_bn(*proof.p)
 	// fmt.Println("proof c: ")
 	// C.print_bn(*proof.c)
-	fmt.Printf("hexproof p: %x\n", hexproofP)
-	fmt.Printf("hexproof c: %x\n", hexproofC)
-	fmt.Printf("responsemodel: %v", b64hexproof)
+	// fmt.Printf("hexproof p: %x\n", hexproofP)
+	// fmt.Printf("hexproof c: %x\n", hexproofC)
+	fmt.Printf("responsemodel: %v\n", hexproof)
+	fmt.Println("receivedproof.p: ")
+	C.print_bn(*anotherproof.p)
+	fmt.Println("receivedproof.c: ")
+	C.print_bn(*anotherproof.c)
     // -=-=-=-=-=-=-=-=-=-=-=-
 
-    return b64hexproof
+	// Check proof correctness
+	verification2 := C.rsa_sig_proof_ver(anotherproof, bigMsg, bigE, bigN)
+    // var ret int
+    if( verification2 == 1) {
+        log.Printf("Success verifying proof!!! :DD \n")
+		// ret = 1
+    } else if( verification2 == 0) {
+		log.Printf("Failed verifying proof :(( \n")
+		// ret = 0
+	} else if( verification2 == -1) {
+        log.Printf("Error verifying proof :(( \n")
+		// ret = -1
+    }
+	
+	C.EVP_PKEY_free(vkey)
+    return hexproof
+}
+
+func VerifyHexProof(hexproof string) *C.rsa_sig_proof_t {
+
+	var bigP, bigC *C.BIGNUM
+
+	parts := strings.Split(hexproof, ".")
+
+	proofP := (C.CString)(parts[1])
+	resultP := C.BN_hex2bn(&bigP, (*C.char)(proofP))
+	if resultP == 0 {
+		fmt.Println("hex2bn fails")
+	}
+
+	proofC := (C.CString)(parts[2])
+	resultC := C.BN_hex2bn(&bigC, (*C.char)(proofC))
+	if resultC == 0 {
+		fmt.Println("hex2bn fails")
+	}
+
+	proof := C.rsa_sig_proof_new(proof_len)
+	proof.len = proof_len
+	proof.p = &bigP
+	proof.c = &bigC
+
+	// -=-=-=- DEBUG -=-=-=-
+	// fmt.Println("parts0", parts[0])
+	// fmt.Println("parts1", parts[1])
+	// fmt.Println("parts2", parts[2])
+	fmt.Println("bigP: ")
+	C.print_bn(bigP)
+	fmt.Println("bigC: ")
+	C.print_bn(bigC)
+	fmt.Println("proof.p: ")
+	C.print_bn(*proof.p)
+	fmt.Println("proof.c: ")
+	C.print_bn(*proof.c)
+	// -=-=-=-=-=-=-=-=-=-=-
+
+	return proof
 }
 
 func EncodeToBase64(v interface{}) (string, error) {
@@ -490,4 +585,12 @@ func EncodeToBase64(v interface{}) (string, error) {
     }
     encoder.Close()
     return buf.String(), nil
+}
+
+func base64Decode(str string) (string, bool) {
+    data, err := base64.StdEncoding.DecodeString(str)
+    if err != nil {
+        return "", true
+    }
+    return string(data), false
 }
