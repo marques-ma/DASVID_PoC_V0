@@ -45,6 +45,7 @@ import (
 
 type FileContents struct {
 	OauthToken					string `json:OauthToken",omitempty"`
+	OauthClaims					map[string]interface{} `json:",omitempty"`
 	DASVIDToken					string `json:DASVIDToken",omitempty"`
 	ZKP							string `json:ZKP",omitempty"`
 }
@@ -223,7 +224,10 @@ func MintHandler(w http.ResponseWriter, r *http.Request) {
 			assertingwl := dasvid.FetchX509SVID()
 
 			// Gen ZKP
-			// About ZKP format:
+			// 
+			// Need to move this to INTROSPECT ENDPOINT with necessary adaptions.
+			// 
+			// About format:
 			// received proof = base64(length.hexa(proof.p).hexa(proof.c))
 			// 
 			// validation: 
@@ -234,11 +238,10 @@ func MintHandler(w http.ResponseWriter, r *http.Request) {
 			// - generate bigSignature from signature
 			// - rsa_sig_proof_ver(proof, bigMsg, bigE, bigN)
 			// 
-			zkp := dasvid.GenZKPproof(oauthtoken, pubkey.Keys[0])
+			zkp := dasvid.GenZKPproof(oauthtoken)
 			if zkp == "" {
 				log.Println("Error generating ZKP proof")
 			}
-
 			// fmt.Println("Proof sucessfully created")
 			// fmt.Println("proof message: ", zkp)
 
@@ -346,9 +349,23 @@ func IntrospectHandler(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			log.Printf("error:", err)
 		}
+
 		
 		if Filetemp.DASVIDToken == datoken {
+
 			log.Println("DASVID ZKP identified!", Filetemp.ZKP )
+			tokenclaims := dasvid.ParseTokenClaims(Filetemp.OauthToken)
+			zkp := dasvid.GenZKPproof(Filetemp.OauthToken)
+			if zkp == "" {
+				log.Println("Error generating ZKP proof")
+			}
+
+			Filetemp = FileContents{
+				OauthClaims:	tokenclaims,
+				ZKP:			zkp,
+			}
+
+
 			json.NewEncoder(w).Encode(Filetemp)
 			return
 		}

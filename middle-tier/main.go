@@ -171,7 +171,8 @@ func Get_balanceHandler(w http.ResponseWriter, r *http.Request) {
 		json.NewEncoder(w).Encode(introspectrsp)
 	}
 
-	log.Println("introspectrsp,ZKP", introspectrsp.ZKP)
+	fmt.Println("introspectrsp.OAuthClaims: ", introspectrsp.OauthClaims)
+	log.Println("introspectrsp.ZKP", introspectrsp.ZKP)
 
 	// Access Target WL and request DASVID user balance
 	endpoint = "https://"+TargetwlIP+"/get_balance?DASVID="+r.FormValue("DASVID")
@@ -284,7 +285,8 @@ func DepositHandler(w http.ResponseWriter, r *http.Request) {
 		json.NewEncoder(w).Encode(introspectrsp)
 	}
 
-	fmt.Println("introspectrsp.ZKP: ",introspectrsp.ZKP)
+	fmt.Println("introspectrsp.OAuthClaims: ", introspectrsp.OauthClaims)
+	fmt.Println("introspectrsp.ZKP: ", introspectrsp.ZKP)
 
 	log.Println("ZKP sucessfully received!")
 
@@ -354,11 +356,9 @@ func introspect(datoken string, client http.Client) (introspectrsp FileContents)
 		log.Fatalf("error:", err)
 	}
 
-	// if fmt.Sprintf("%x",zkptmp.Sum(nil)) != rcvresp.ZKP {
-	// 	returnmsg = "ZKP error!"
-	// } else { returnmsg = "" }
 
 	introspectrsp = FileContents{
+		OauthClaims: rcvresp.OauthClaims,
 		ZKP		 :	rcvresp.ZKP,
 		Returnmsg:  "",
 	}

@@ -357,7 +357,7 @@ func FetchX509SVID() *x509svid.SVID {
 	return svid
 }
 
-func GenZKPproof(OAuthToken string, publickey JWK) string {
+func GenZKPproof(OAuthToken string) string {
 	defer timeTrack(time.Now(), "Generate ZKP")
 
     var vkey *C.EVP_PKEY
@@ -365,9 +365,8 @@ func GenZKPproof(OAuthToken string, publickey JWK) string {
 
     parts := strings.Split(OAuthToken, ".")
 	
-	vkey = token2vkey(OAuthToken, 0)
-
     // Extract token signature, its length and allocate sig_C
+	vkey = token2vkey(OAuthToken, 0)
 	signature, err := base64.RawURLEncoding.DecodeString(parts[2])
 	if err != nil {
 		log.Printf("Error collecting signature: %v", err)
