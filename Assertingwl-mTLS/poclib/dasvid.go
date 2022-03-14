@@ -397,28 +397,6 @@ func GenZKPproof(OAuthToken string, publickey JWK) string {
 	bigE = C.BN_new()
     C.rsa_vkey_extract_bn(&bigN, &bigE, vkey)
     
-
-    // -=-=-=-=-= DEBUG -=-=-=-=-=-
-	// Generate message hash
-    // hasher := crypto.SHA256.New()
-	// hasher.Write(message)
-	
-	// fmt.Println("\n*** Input data ***")
-	// fmt.Println("BigN: ")
-	// C.print_bn(bigN)
-	// fmt.Println("BigE: ")
-	// C.print_bn(bigE)
-	// fmt.Println("\nsig: ", signature)
-	// fmt.Println("sig_size: ", sig_len)
-	// fmt.Println("bigSig: ")
-	// C.print_bn(bigSig)	
-	// fmt.Println("message hash:  ", fmt.Sprintf("%x",hasher.Sum(nil)))
-	// fmt.Println("\nmessage: ", string(message))
-	// fmt.Println("msg_size: ", (C.uint)(msg_len))
-	// fmt.Println("BigMSG: ")
-	// C.print_bn(bigMsg)	
-    // -=-=-=-=-=-=-=-=-=-=-=-=-=-=- 
-
     // Verify signature correctness 
 	// alterar os hardcoded tipo 0 1
 	sigver := C.rsa_bn_ver(bigSig, bigMsg, bigN, bigE)
@@ -463,8 +441,11 @@ func GenZKPproof(OAuthToken string, publickey JWK) string {
 	// This approach only work if proof_len = 1
 	// Bigger proof length impacts in bigger proof sizes (proof_len = 128 ~ 131kb) and may not be suitable for scalable scenarios
 	// 
-	// Need to analyse if  proof_len = 1 is enough as proof for a short lived DASVID
+	// Maybe proof_len = 1 is enough as proof for a short lived DASVID
+	// We can consider proof_len = 1 as genZKPproof and introspect endpoint standard response. 
+	// If application need more proves it need to make more calls to the endpoint
 	// 
+	
 	// Gen base64 representation
 	hexproofP := C.BN_bn2hex(*proof.p)
 	defer C.free(unsafe.Pointer(hexproofP))
@@ -499,24 +480,12 @@ func GenZKPproof(OAuthToken string, publickey JWK) string {
 
 
 	// -=-=-=- DEBUG -=-=-=-=-
-    // fmt.Println("Proof sucessfully created")
-	// fmt.Println("proof: ", proof)
-	// fmt.Println("proof length: ", int(proof.len))
-	// fmt.Println("proof p: ")
-	// C.print_bn(*proof.p)
-	// fmt.Println("proof c: ")
-	// C.print_bn(*proof.c)
-	// fmt.Printf("hexproof p: %x\n", hexproofP)
-	// fmt.Printf("hexproof c: %x\n", hexproofC)
-	// fmt.Printf("responsemodel: %v\n", hexproof)
-	// fmt.Println("receivedproof.p: ")
-	// C.print_bn(*receivedproof.p)
-	// fmt.Println("receivedproof.c: ")
-	// C.print_bn(*receivedproof.c)
-	// fmt.Println("receivedproof.p: ")
+	// fmt.Println("anotherproof length: ", int(anotherproof.len))
+	// fmt.Println("anotherproof p: ")
 	// C.print_bn(*anotherproof.p)
-	// fmt.Println("receivedproof.c: ")
+	// fmt.Println("anotherproof c: ")
 	// C.print_bn(*anotherproof.c)
+	// fmt.Printf("responsemodel: %v\n", hexproof)
     // -=-=-=-=-=-=-=-=-=-=-=-
 
 	// Check proof correctness
