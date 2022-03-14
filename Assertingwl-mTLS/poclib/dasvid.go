@@ -61,9 +61,10 @@ import (
 const (
 	socketPath 	= "unix:///tmp/spire-agent/public/api.sock"
 	// set path to OAuth PEM public key file 
-	path 		= "./keys/oauth.pem"
+	path 			= "./keys/oauth.pem"
+	hexpath 		= "./data/hexproofs.data"
 	//  proof_len The number of components in the proof.
-	proof_len 	= 128
+	proof_len 	= 1
 )
 
 type SVID struct {
@@ -360,32 +361,11 @@ func GenZKPproof(OAuthToken string, publickey JWK) string {
 	defer timeTrack(time.Now(), "Generate ZKP")
 
     var vkey *C.EVP_PKEY
-    var bigN, bigE, bigSig, bigMsg *C.BIGNUM
-    var filepem *C.FILE
+	var bigN, bigE, bigSig, bigMsg *C.BIGNUM
 
     parts := strings.Split(OAuthToken, ".")
 	
-    // extract token issuer and generate path to /keys endpoint
-    tokenclaims := ParseTokenClaims(OAuthToken)
-    issuer := fmt.Sprintf("%v", tokenclaims["iss"])
-    // Considering its OKTA based solution, add /keys endpoint
-	// TODO:
-	// ADD support for google tokens as done in main.go
-    keyEndPoint := issuer+"/v1/keys"
-
-    // Use script to convert jwk retrieved from OKTA endpoint to 
-    // PEM file and save in ./keys/
-    cmd := exec.Command("./poclib/jwk2der.sh", keyEndPoint)
-    err := cmd.Run()
-    if err != nil {
-        log.Fatal(err)
-    }
-
-    // Open OAuth PEM file containing Public Key
-    filepem = C.fopen((C.CString)(path),(C.CString)("r")) 
-  
-    // Load key from PEM file to VKEY
-    C.PEM_read_PUBKEY(filepem, &vkey, nil, nil)
+	vkey = token2vkey(OAuthToken, 0)
 
     // Extract token signature, its length and allocate sig_C
 	signature, err := base64.RawURLEncoding.DecodeString(parts[2])
@@ -478,6 +458,13 @@ func GenZKPproof(OAuthToken string, publickey JWK) string {
 		log.Printf("Failed verifying sigproof :(( \n")
 		// ret = 0
 	}
+	
+	// !NOTE!
+	// This approach only work if proof_len = 1
+	// Bigger proof length impacts in bigger proof sizes (proof_len = 128 ~ 131kb) and may not be suitable for scalable scenarios
+	// 
+	// Need to analyse if  proof_len = 1 is enough as proof for a short lived DASVID
+	// 
 	// Gen base64 representation
 	hexproofP := C.BN_bn2hex(*proof.p)
 	defer C.free(unsafe.Pointer(hexproofP))
@@ -490,45 +477,59 @@ func GenZKPproof(OAuthToken string, publickey JWK) string {
 	separator := "."
 	// hexproof = length.P.C
 	hexproof := fmt.Sprint(proof.len) + separator + gohexproofP + separator + gohexproofC
-
-	// Reconstruct proof from hexproof and test it
-	var anotherproof *C.rsa_sig_proof_t
-	anotherproof = C.rsa_sig_proof_new(proof_len)
 	
-	receivedproof := VerifyHexProof(hexproof)
+    file, err := os.Create(hexpath)
+    if err != nil {
+        log.Printf("Error creating hexproof file \n")
+    }
+    defer file.Close()
+
+	file.WriteString(hexproof)
+
+	// Verify generated HexProof
+	hexresult := VerifyHexProof(hexproof, message, vkey)
+	if hexresult == false {
+		log.Fatal("Error verifying hexproof!!")
+	}
+
+	var anotherproof *C.rsa_sig_proof_t
+	anotherproof = C.rsa_sig_proof_new((C.int)(proof_len))
 	anotherproof.len = (C.int)(proof_len)
-	C.BN_copy(*anotherproof.p, *receivedproof.p)
-	C.BN_copy(*anotherproof.c, *receivedproof.c)
+	anotherproof = C.rsa_sig_proof_copy((C.int)(proof_len), proof)
 
 
 	// -=-=-=- DEBUG -=-=-=-=-
     // fmt.Println("Proof sucessfully created")
 	// fmt.Println("proof: ", proof)
 	// fmt.Println("proof length: ", int(proof.len))
-	fmt.Println("proof p: ")
-	C.print_bn(*proof.p)
+	// fmt.Println("proof p: ")
+	// C.print_bn(*proof.p)
 	// fmt.Println("proof c: ")
 	// C.print_bn(*proof.c)
 	// fmt.Printf("hexproof p: %x\n", hexproofP)
 	// fmt.Printf("hexproof c: %x\n", hexproofC)
-	fmt.Printf("responsemodel: %v\n", hexproof)
-	fmt.Println("receivedproof.p: ")
-	C.print_bn(*anotherproof.p)
-	fmt.Println("receivedproof.c: ")
-	C.print_bn(*anotherproof.c)
+	// fmt.Printf("responsemodel: %v\n", hexproof)
+	// fmt.Println("receivedproof.p: ")
+	// C.print_bn(*receivedproof.p)
+	// fmt.Println("receivedproof.c: ")
+	// C.print_bn(*receivedproof.c)
+	// fmt.Println("receivedproof.p: ")
+	// C.print_bn(*anotherproof.p)
+	// fmt.Println("receivedproof.c: ")
+	// C.print_bn(*anotherproof.c)
     // -=-=-=-=-=-=-=-=-=-=-=-
 
 	// Check proof correctness
 	verification2 := C.rsa_sig_proof_ver(anotherproof, bigMsg, bigE, bigN)
     // var ret int
     if( verification2 == 1) {
-        log.Printf("Success verifying proof!!! :DD \n")
+        log.Printf("Success verifying anotherproof!!! :DD \n")
 		// ret = 1
     } else if( verification2 == 0) {
-		log.Printf("Failed verifying proof :(( \n")
+		log.Printf("Failed verifying anotherproof :(( \n")
 		// ret = 0
 	} else if( verification2 == -1) {
-        log.Printf("Error verifying proof :(( \n")
+        log.Printf("Error verifying anotherproof :(( \n")
 		// ret = -1
     }
 	
@@ -536,61 +537,123 @@ func GenZKPproof(OAuthToken string, publickey JWK) string {
     return hexproof
 }
 
-func VerifyHexProof(hexproof string) *C.rsa_sig_proof_t {
+func VerifyHexProof(hexproof string, msg []byte, reckey *C.EVP_PKEY) bool {
 
-	var bigP, bigC *C.BIGNUM
+	var bigP, bigC, bigN, bigE, bigMsg *C.BIGNUM
+	var proof *C.rsa_sig_proof_t
+	bigP = C.BN_new()
+	bigC = C.BN_new()
+	bigN = C.BN_new()
+	bigE = C.BN_new()
+	bigMsg = C.BN_new()
 
-	parts := strings.Split(hexproof, ".")
+	hexparts := strings.Split(hexproof, ".")
 
-	proofP := (C.CString)(parts[1])
+	// Gen bigP
+	proofP := (C.CString)(hexparts[1])
+	defer C.free(unsafe.Pointer(proofP)) 
 	resultP := C.BN_hex2bn(&bigP, (*C.char)(proofP))
 	if resultP == 0 {
 		fmt.Println("hex2bn fails")
 	}
 
-	proofC := (C.CString)(parts[2])
+	// Gen bigC
+	proofC := (C.CString)(hexparts[2])
+	defer C.free(unsafe.Pointer(proofC)) 
 	resultC := C.BN_hex2bn(&bigC, (*C.char)(proofC))
 	if resultC == 0 {
 		fmt.Println("hex2bn fails")
 	}
 
-	proof := C.rsa_sig_proof_new(proof_len)
-	proof.len = proof_len
-	proof.p = &bigP
-	proof.c = &bigC
+	// reconstruct proof
+	proof = C.rsa_sig_proof_new(proof_len)
+	proof.len = (C.int)(proof_len)
+	if C.BN_copy(*proof.p, bigP) == nil || C.BN_copy(*proof.c, bigC) == nil {
+		log.Fatal("Error copying BN")
+	}
+
+	msg_len := len(msg)
+	msg_C := C.CBytes(msg)
+	defer C.free(unsafe.Pointer(msg_C))
+	
+	// Generate bigMSG
+	bigmsgresult := C.rsa_msg_evp_extract_bn(&bigMsg, (*C.uchar)(msg_C), (C.uint)(msg_len), reckey)
+	if bigmsgresult != 1 {
+		log.Printf("Error generating bigMSG")
+	}
+
+	// Extract bigN and bigE from VKEY
+    C.rsa_vkey_extract_bn(&bigN, &bigE, reckey)
+
+	// Check proof correctness
+	proofcheck := C.rsa_sig_proof_ver(proof, bigMsg, bigE, bigN)
+	if( proofcheck == 0) {
+		log.Printf("Failed verifying proof inside hexproof :(( \n")
+		return false
+	} else if( proofcheck == -1) {
+        log.Printf("Error verifying proof inside hexproof :(( \n")
+		return false
+    }
+	log.Printf("Success verifying proof inside hexproof!!! :DD \n")
 
 	// -=-=-=- DEBUG -=-=-=-
 	// fmt.Println("parts0", parts[0])
 	// fmt.Println("parts1", parts[1])
 	// fmt.Println("parts2", parts[2])
-	fmt.Println("bigP: ")
-	C.print_bn(bigP)
-	fmt.Println("bigC: ")
-	C.print_bn(bigC)
-	fmt.Println("proof.p: ")
-	C.print_bn(*proof.p)
-	fmt.Println("proof.c: ")
-	C.print_bn(*proof.c)
+	// fmt.Println("bigP: ")
+	// C.print_bn(bigP)
+	// fmt.Println("bigC: ")
+	// C.print_bn(bigC)
+	// fmt.Println("bigN: ")
+	// C.print_bn(bigN)
+	// fmt.Println("bigE: ")
+	// C.print_bn(bigE)
+	// fmt.Println("bigMSG: ")
+	// C.print_bn(bigMsg)
+	// fmt.Println("proof.p: ")
+	// C.print_bn(*proof.p)
+	// fmt.Println("proof.c: ")
+	// C.print_bn(*proof.c)
 	// -=-=-=-=-=-=-=-=-=-=-
 
-	return proof
+	return true
 }
 
-func EncodeToBase64(v interface{}) (string, error) {
-    var buf bytes.Buffer
-    encoder := base64.NewEncoder(base64.StdEncoding, &buf)
-    err := json.NewEncoder(encoder).Encode(v)
-    if err != nil {
-        return "", err
-    }
-    encoder.Close()
-    return buf.String(), nil
-}
+func token2vkey(token string, tokentype int) *C.EVP_PKEY {
 
-func base64Decode(str string) (string, bool) {
-    data, err := base64.StdEncoding.DecodeString(str)
+	var vkey *C.EVP_PKEY
+    var filepem *C.FILE
+
+	// extract token issuer and generate path to /keys endpoint
+    tokenclaims := ParseTokenClaims(token)
+
+	var issuer string
+	if tokentype == 0 {
+		issuer = fmt.Sprintf("%v", tokenclaims["iss"])
+	} else if tokentype ==1 {
+		issuer = fmt.Sprintf("%v", tokenclaims["dpa"])
+	} else {
+		log.Fatal("No token type informed.")
+	}
+
+    // Considering its OKTA based solution, add /keys endpoint
+	// TODO:
+	// ADD support for google tokens as done in main.go
+    keyEndPoint := issuer+"/v1/keys"
+
+    // Use script to convert jwk retrieved from OKTA endpoint to 
+    // PEM file and save in ./keys/
+    cmd := exec.Command("./poclib/jwk2der.sh", keyEndPoint)
+    err := cmd.Run()
     if err != nil {
-        return "", true
+        log.Fatal(err)
     }
-    return string(data), false
+
+    // Open OAuth PEM file containing Public Key
+    filepem = C.fopen((C.CString)(path),(C.CString)("r")) 
+  
+    // Load key from PEM file to VKEY
+    C.PEM_read_PUBKEY(filepem, &vkey, nil, nil)
+
+	return vkey
 }

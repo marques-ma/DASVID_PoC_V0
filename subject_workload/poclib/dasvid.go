@@ -75,6 +75,12 @@ type JWK struct {
 	X5t string
 }
 
+func timeTrack(start time.Time, name string) {
+    elapsed := time.Since(start)
+    log.Printf("%s execution time is %s", name, elapsed)
+}
+
+
 func VerifySignature(jwtToken string, key JWK) error {
 	parts := strings.Split(jwtToken, ".")
 	message := []byte(strings.Join(parts[0:2], "."))

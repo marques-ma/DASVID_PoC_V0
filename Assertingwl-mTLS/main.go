@@ -239,8 +239,8 @@ func MintHandler(w http.ResponseWriter, r *http.Request) {
 				log.Println("Error generating ZKP proof")
 			}
 
-			fmt.Println("Proof sucessfully created")
-			fmt.Println("proof message: ", zkp)
+			// fmt.Println("Proof sucessfully created")
+			// fmt.Println("proof message: ", zkp)
 
 			// Generate DASVID claims
 			iss := assertingwl.ID.String()

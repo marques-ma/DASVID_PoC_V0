@@ -16,15 +16,13 @@ import (
 	"github.com/spiffe/go-spiffe/v2/spiffeid"
 	"github.com/spiffe/go-spiffe/v2/spiffetls/tlsconfig"
 	
-	// To generate a sample ZKP response
-	"crypto/sha256"
-
 )
 
 type FileContents struct {
 	OauthClaims					map[string]interface{} `json:",omitempty"`
 	DASVIDToken					string `json:",omitempty"`
 	ZKP							string `json:",omitempty"`
+	Returnmsg					string `json:",omitempty"`
 }
 
 type Contents struct {
@@ -166,13 +164,14 @@ func Get_balanceHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	tempbalance = introspect(r.FormValue("DASVID"), *client)
+	var introspectrsp FileContents
+	introspectrsp = introspect(r.FormValue("DASVID"), *client)
 	if tempbalance.Returnmsg != "" {
-		log.Println("ZKP error! %v", tempbalance.Returnmsg)
-		json.NewEncoder(w).Encode(tempbalance)
+		log.Println("ZKP error! %v", introspectrsp.Returnmsg)
+		json.NewEncoder(w).Encode(introspectrsp)
 	}
 
-	log.Println("ZKP sucessfully validated!")
+	log.Println("introspectrsp,ZKP", introspectrsp.ZKP)
 
 	// Access Target WL and request DASVID user balance
 	endpoint = "https://"+TargetwlIP+"/get_balance?DASVID="+r.FormValue("DASVID")
@@ -278,14 +277,23 @@ func DepositHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	tempbalance = introspect(r.FormValue("DASVID"), *client)
-	if tempbalance.Returnmsg != "" {
-		log.Println("ZKP error! %v", tempbalance.Returnmsg)
-		json.NewEncoder(w).Encode(tempbalance)
+	var introspectrsp FileContents
+	introspectrsp = introspect(r.FormValue("DASVID"), *client)
+	if introspectrsp.Returnmsg != "" {
+		log.Println("ZKP error! %v", introspectrsp.Returnmsg)
+		json.NewEncoder(w).Encode(introspectrsp)
 	}
 
-	log.Println("ZKP sucessfully validated!")
+	fmt.Println("introspectrsp.ZKP: ",introspectrsp.ZKP)
 
+	log.Println("ZKP sucessfully received!")
+
+	// após receber a prova, o M.T. precisa reconstruir o tipo de dado rsa_sig_t convertendo p e c de hex pra BN
+	// precisa dos claims, da prova e da chave pública do issuer do Oauth token
+	// 
+
+
+	// Gera chamada para target workload 
 	endpoint = "https://"+TargetwlIP+"/deposit?DASVID="+r.FormValue("DASVID")+"&deposit="+r.FormValue("deposit")
 
 	response, err = client.Get(endpoint)
@@ -322,10 +330,10 @@ func GetOutboundIP(port string) string {
     return uri
 }
 
-func introspect(datoken string, client http.Client) (tempbalance Balancetemp) {
+func introspect(datoken string, client http.Client) (introspectrsp FileContents) {
 	
 	// Introspect DA-SVID
-	var returnmsg string
+	// var returnmsg string
 	var rcvresp FileContents
 
 	endpoint := "https://"+AssertingwlIP+"/introspect?DASVID="+datoken
@@ -346,16 +354,14 @@ func introspect(datoken string, client http.Client) (tempbalance Balancetemp) {
 		log.Fatalf("error:", err)
 	}
 
-	zkptmp := sha256.New()
-	zkptmp.Write([]byte(fmt.Sprintf("%v",datoken)))
+	// if fmt.Sprintf("%x",zkptmp.Sum(nil)) != rcvresp.ZKP {
+	// 	returnmsg = "ZKP error!"
+	// } else { returnmsg = "" }
 
-	if fmt.Sprintf("%x",zkptmp.Sum(nil)) != rcvresp.ZKP {
-		returnmsg = "ZKP error!"
-	} else { returnmsg = "" }
-
-	tempbalance = Balancetemp{
-		Returnmsg: 	returnmsg,
+	introspectrsp = FileContents{
+		ZKP		 :	rcvresp.ZKP,
+		Returnmsg:  "",
 	}
 
-	return tempbalance
+	return introspectrsp
 }

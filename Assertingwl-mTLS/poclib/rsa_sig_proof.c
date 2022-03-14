@@ -267,3 +267,27 @@ int rsa_evp_sig_proof_ver(rsa_sig_proof_t *proof, unsigned char *msg, unsigned i
 
     return rsa_sig_proof_ver(proof, m, e, n);
 }
+
+/**
+ * Make a copy from a proof of ownership of an RSA signature.
+ * 
+ * @param proof_len The length of the proof.
+ * @param proofsrc The proof to be copied.
+ * 
+ * @return A new proof represented as (rsa_sig_proof_t).
+ */
+rsa_sig_proof_t *rsa_sig_proof_copy(int proof_len, rsa_sig_proof_t *proofsrc) {
+    int i;
+    rsa_sig_proof_t *proofdest;
+
+    proofdest = rsa_sig_proof_new(proof_len);
+
+    for(i = 0; i < proof_len; i++) {
+
+        BN_copy(proofdest->p[i], proofsrc->p[i]);
+		BN_copy(proofdest->c[i], proofsrc->c[i]);
+
+    }
+
+    return proofdest;
+}
