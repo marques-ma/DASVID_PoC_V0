@@ -1,4 +1,23 @@
 package main
+/*
+#include <string.h>
+#include <openssl/crypto.h>
+#include <openssl/bn.h>
+#include <openssl/rsa.h>
+#include <openssl/evp.h>
+#include <openssl/err.h>
+#include <openssl/pem.h>
+#include <openssl/x509.h>
+#include "./poclib/rsa_sig_proof.h"
+#include "./poclib/rsa_bn_sig.h"
+#include "./poclib/rsa_sig_proof_util.h"
+
+#cgo CFLAGS: -g -Wall -m64 -I${SRCDIR}
+#cgo pkg-config: --static libssl libcrypto
+#cgo LDFLAGS: -L${SRCDIR}
+
+*/
+import "C"
 
 import (
 	
@@ -15,15 +34,20 @@ import (
 	"github.com/spiffe/go-spiffe/v2/workloadapi"
 	"github.com/spiffe/go-spiffe/v2/spiffeid"
 	"github.com/spiffe/go-spiffe/v2/spiffetls/tlsconfig"
+
+	// dasvid lib
+	// dasvid "github.com/marco-developer/dasvid/poclib"
 	
 )
 
 type FileContents struct {
-	OauthClaims					map[string]interface{} `json:",omitempty"`
-	DASVIDToken					string `json:",omitempty"`
-	ZKP							string `json:",omitempty"`
+	OauthToken					string `json:OauthToken",omitempty"`
+	Msg							[]byte `json:Msg",omitempty"`
+	DASVIDToken					string `json:DASVIDToken",omitempty"`
+	ZKP							string `json:ZKP",omitempty"`
 	Returnmsg					string `json:",omitempty"`
 }
+
 
 type Contents struct {
 	DasvidExpValidation 		*bool `json:",omitempty"`
@@ -166,13 +190,20 @@ func Get_balanceHandler(w http.ResponseWriter, r *http.Request) {
 
 	var introspectrsp FileContents
 	introspectrsp = introspect(r.FormValue("DASVID"), *client)
-	if tempbalance.Returnmsg != "" {
+	if introspectrsp.Returnmsg != "" {
 		log.Println("ZKP error! %v", introspectrsp.Returnmsg)
 		json.NewEncoder(w).Encode(introspectrsp)
 	}
 
-	fmt.Println("introspectrsp.OAuthClaims: ", introspectrsp.OauthClaims)
-	log.Println("introspectrsp.ZKP", introspectrsp.ZKP)
+	// var vkey *C.EVP_PKEY
+	// tmpvkey := dasvid.Token2vkey(r.FormValue("DASVID"), 1)
+	// // vkey = dasvid.Token2vkey(r.FormValue("DASVID"), 1)
+
+	// hexresult := dasvid.VerifyHexProof(introspectrsp.ZKP, introspectrsp.Msg, tmpvkey)
+	// if hexresult == false {
+	// 	log.Fatal("Error verifying hexproof!!")
+	// }
+	// log.Println("Success verifying hexproof!")
 
 	// Access Target WL and request DASVID user balance
 	endpoint = "https://"+TargetwlIP+"/get_balance?DASVID="+r.FormValue("DASVID")
@@ -285,15 +316,12 @@ func DepositHandler(w http.ResponseWriter, r *http.Request) {
 		json.NewEncoder(w).Encode(introspectrsp)
 	}
 
-	fmt.Println("introspectrsp.OAuthClaims: ", introspectrsp.OauthClaims)
-	fmt.Println("introspectrsp.ZKP: ", introspectrsp.ZKP)
+	// vkey := dasvid.Token2vkey(r.FormValue("DASVID"), 1)
 
-	log.Println("ZKP sucessfully received!")
-
-	// após receber a prova, o M.T. precisa reconstruir o tipo de dado rsa_sig_t convertendo p e c de hex pra BN
-	// precisa dos claims, da prova e da chave pública do issuer do Oauth token
-	// 
-
+	// hexresult := dasvid.VerifyHexProof(introspectrsp.ZKP, introspectrsp.Msg, vkey)
+	// if hexresult == false {
+	// 	log.Fatal("Error verifying hexproof!!")
+	// }
 
 	// Gera chamada para target workload 
 	endpoint = "https://"+TargetwlIP+"/deposit?DASVID="+r.FormValue("DASVID")+"&deposit="+r.FormValue("deposit")
@@ -358,9 +386,9 @@ func introspect(datoken string, client http.Client) (introspectrsp FileContents)
 
 
 	introspectrsp = FileContents{
-		OauthClaims: rcvresp.OauthClaims,
-		ZKP		 :	rcvresp.ZKP,
-		Returnmsg:  "",
+		Msg			: rcvresp.Msg,
+		ZKP		 	:	rcvresp.ZKP,
+		Returnmsg	:  "",
 	}
 
 	return introspectrsp

@@ -94,10 +94,4 @@ int rsa_evp_sig_proof_ver(rsa_sig_proof_t *proof, unsigned char *msg, unsigned i
 
 rsa_sig_proof_t *rsa_sig_proof_copy(int proof_len, rsa_sig_proof_t *proofsrc);
 
-char* rsa_sig_proof2hex(int proof_len, rsa_sig_proof_t *proof);
-
-rsa_sig_proof_t *rsa_sig_hex2proof(int proof_len, char *hexproof);
-
-char * getAllButFirstAndLast(char *input);
-
 #endif /* HEADER_RSA_SIG_PROOF_H */

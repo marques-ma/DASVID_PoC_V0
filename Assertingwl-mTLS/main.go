@@ -45,7 +45,7 @@ import (
 
 type FileContents struct {
 	OauthToken					string `json:OauthToken",omitempty"`
-	OauthClaims					map[string]interface{} `json:",omitempty"`
+	Msg							[]byte `json:Msg",omitempty"`
 	DASVIDToken					string `json:DASVIDToken",omitempty"`
 	ZKP							string `json:ZKP",omitempty"`
 }
@@ -217,8 +217,8 @@ func MintHandler(w http.ResponseWriter, r *http.Request) {
 
 			*sigresult = true
 			
-			parts := strings.Split(oauthtoken, ".")
-			oauthmsg := strings.Join(parts[0:2], ".")
+			// parts := strings.Split(oauthtoken, ".")
+			// oauthmsg := strings.Join(parts[0:2], ".")
 
 			// Fetch Asserting workload SVID to use as DASVID issuer
 			assertingwl := dasvid.FetchX509SVID()
@@ -238,10 +238,10 @@ func MintHandler(w http.ResponseWriter, r *http.Request) {
 			// - generate bigSignature from signature
 			// - rsa_sig_proof_ver(proof, bigMsg, bigE, bigN)
 			// 
-			zkp := dasvid.GenZKPproof(oauthtoken)
-			if zkp == "" {
-				log.Println("Error generating ZKP proof")
-			}
+			// zkp := dasvid.GenZKPproof(oauthtoken)
+			// if zkp == "" {
+			// 	log.Println("Error generating ZKP proof")
+			// }
 			// fmt.Println("Proof sucessfully created")
 			// fmt.Println("proof message: ", zkp)
 
@@ -255,7 +255,7 @@ func MintHandler(w http.ResponseWriter, r *http.Request) {
 			awprivatekey := dasvid.RetrievePrivateKey("./keys/key.pem")
 
 			// Generate DASVID
-			token := dasvid.Mintdasvid(iss, sub, dpa, dpr, oauthmsg, zkp, awprivatekey)
+			token := dasvid.Mintdasvid(iss, sub, dpa, dpr, awprivatekey)
 
 			// Data to be returned in API 
 			Data = PocData{
@@ -269,7 +269,7 @@ func MintHandler(w http.ResponseWriter, r *http.Request) {
 			Filetemp = FileContents{
 				OauthToken:					oauthtoken,
 				DASVIDToken:	 			token,
-				ZKP:						zkp,
+				// ZKP:						zkp,
 			}
 			
 			// Save token and ZKP (not implemented) in cache
@@ -354,14 +354,17 @@ func IntrospectHandler(w http.ResponseWriter, r *http.Request) {
 		if Filetemp.DASVIDToken == datoken {
 
 			log.Println("DASVID ZKP identified!", Filetemp.ZKP )
-			tokenclaims := dasvid.ParseTokenClaims(Filetemp.OauthToken)
+			// tokenclaims := dasvid.ParseTokenClaims(Filetemp.OauthToken)
 			zkp := dasvid.GenZKPproof(Filetemp.OauthToken)
 			if zkp == "" {
 				log.Println("Error generating ZKP proof")
 			}
 
+			parts := strings.Split(Filetemp.OauthToken, ".")
+			message := []byte(strings.Join(parts[0:2], "."))
+
 			Filetemp = FileContents{
-				OauthClaims:	tokenclaims,
+				Msg:			message,
 				ZKP:			zkp,
 			}
 

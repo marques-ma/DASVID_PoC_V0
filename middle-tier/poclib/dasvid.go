@@ -64,7 +64,7 @@ const (
 	path 			= "./keys/oauth.pem"
 	hexpath 		= "./data/hexproofs.data"
 	//  proof_len The number of components in the proof.
-	proof_len 	= 80
+	proof_len 	= 1
 )
 
 type SVID struct {
@@ -365,7 +365,7 @@ func GenZKPproof(OAuthToken string) string {
     parts := strings.Split(OAuthToken, ".")
 	
     // Extract token signature, its length and allocate sig_C
-	vkey = token2vkey(OAuthToken, 0)
+	vkey = Token2vkey(OAuthToken, 0)
 	signature, err := base64.RawURLEncoding.DecodeString(parts[2])
 	if err != nil {
 		log.Printf("Error collecting signature: %v", err)
@@ -401,9 +401,9 @@ func GenZKPproof(OAuthToken string) string {
 	if( sigver == 0) {
         log.Printf("Error in signature verification\n")
     }
-	// if( sigver == 1) {
-    //     log.Printf("Signature verification success!\n")
-    // }
+	if( sigver == 1) {
+        log.Printf("Signature verification success!\n")
+    }
 
     // Generate Zero Knowledge Proof
 	//  definir constantes ao inves de 2048 etc...
@@ -414,15 +414,26 @@ func GenZKPproof(OAuthToken string) string {
 	
 	// Check proof correctness
 	verification := C.rsa_sig_proof_ver(proof, bigMsg, bigE, bigN)
-	if(verification == 0) || (verification == -1) {
-		log.Println("Errpr verifying proof: %d \n", verification)
+    // var ret int
+    if( verification == 1) {
+        log.Printf("Success verifying proof!!! :DD \n")
+		// ret = 1
+    } else if( verification == 0) {
+		log.Printf("Failed verifying proof :(( \n")
+		// ret = 0
+	} else if( verification == -1) {
+        log.Printf("Error verifying proof :(( \n")
+		// ret = -1
     }
 	
 	sigproof := C.rsa_evp_sig_proof_ver(proof, (*C.uchar)(msg_C), (C.uint)(msg_len), vkey)
-	if( sigproof != 1) {
-        log.Printf("Failed verifying sigproof ! \n")
+	if( sigproof == 1) {
+        log.Printf("Success verifying sigproof!!! :DD \n")
 		// ret = 1
-    }
+    } else {
+		log.Printf("Failed verifying sigproof :(( \n")
+		// ret = 0
+	}
 	
 	// !NOTE!
 	// This approach only work if proof_len = 1
@@ -433,17 +444,6 @@ func GenZKPproof(OAuthToken string) string {
 	// If application need more proves it need to make more calls to the endpoint
 	// 
 	
-
-	// results receive a JSON with ALL proof P and C.
-	// we can send the JSON over network and reconstruct the proof using it
-	results := C.rsa_sig_proof2hex((C.int)(proof_len), proof)
-	goresults := C.GoString(results)
-	fmt.Println("rsa_sig_proof2hex: ", goresults)
-
-	reconstructed := C.rsa_sig_hex2proof((C.int)(proof_len), results)
-	if reconstructed == nil {
-		fmt.Println("reconstructed nil")
-	}
 	// Gen base64 representation
 	hexproofP := C.BN_bn2hex(*proof.p)
 	defer C.free(unsafe.Pointer(hexproofP))
@@ -454,18 +454,19 @@ func GenZKPproof(OAuthToken string) string {
 	gohexproofC := C.GoString(hexproofC)
 
 	separator := "."
+	// hexproof = length.P.C
 	hexproof := fmt.Sprint(proof.len) + separator + gohexproofP + separator + gohexproofC
 	
 	// Verify generated HexProof
-	// hexresult := VerifyHexProof(hexproof, message, vkey)
-	// if hexresult == false {
-	// 	log.Fatal("Error verifying hexproof!!")
-	// }
+	hexresult := VerifyHexProof(hexproof, message, vkey)
+	if hexresult == false {
+		log.Fatal("Error verifying hexproof!!")
+	}
 
-	// var anotherproof *C.rsa_sig_proof_t
-	// anotherproof = C.rsa_sig_proof_new((C.int)(proof_len))
-	// anotherproof.len = (C.int)(proof_len)
-	// anotherproof = C.rsa_sig_proof_copy((C.int)(proof_len), proof)
+	var anotherproof *C.rsa_sig_proof_t
+	anotherproof = C.rsa_sig_proof_new((C.int)(proof_len))
+	anotherproof.len = (C.int)(proof_len)
+	anotherproof = C.rsa_sig_proof_copy((C.int)(proof_len), proof)
 
 
 	// -=-=-=- DEBUG -=-=-=-=-
@@ -478,16 +479,16 @@ func GenZKPproof(OAuthToken string) string {
     // -=-=-=-=-=-=-=-=-=-=-=-
 
 	// Check proof correctness
-	verification2 := C.rsa_sig_proof_ver(reconstructed, bigMsg, bigE, bigN)
+	verification2 := C.rsa_sig_proof_ver(anotherproof, bigMsg, bigE, bigN)
     // var ret int
     if( verification2 == 1) {
-        log.Printf("Success verifying reconstructed!!! :DD \n")
+        log.Printf("Success verifying anotherproof!!! :DD \n")
 		// ret = 1
     } else if( verification2 == 0) {
-		log.Printf("Failed verifying reconstructed :(( \n")
+		log.Printf("Failed verifying anotherproof :(( \n")
 		// ret = 0
 	} else if( verification2 == -1) {
-        log.Printf("Error verifying reconstructed :(( \n")
+        log.Printf("Error verifying anotherproof :(( \n")
 		// ret = -1
     }
 	
@@ -496,6 +497,7 @@ func GenZKPproof(OAuthToken string) string {
 }
 
 func VerifyHexProof(hexproof string, msg []byte, reckey *C.EVP_PKEY) bool {
+	defer timeTrack(time.Now(), "Verify Hexproof")
 
 	var bigP, bigC, bigN, bigE, bigMsg *C.BIGNUM
 	var proof *C.rsa_sig_proof_t
@@ -579,7 +581,7 @@ func VerifyHexProof(hexproof string, msg []byte, reckey *C.EVP_PKEY) bool {
 
 // Receive a JWT token, identify the issuer and contact /keys endpoint to retrieve JWK public key.
 // Convert the JWT to PEM and finally PEM to OpenSSL vkey.
-func token2vkey(token string, tokentype int) *C.EVP_PKEY {
+func Token2vkey(token string, tokentype int) *C.EVP_PKEY {
 
 	var vkey *C.EVP_PKEY
     var filepem *C.FILE
