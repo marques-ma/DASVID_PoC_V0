@@ -5,6 +5,9 @@
 #include "rsa_sig_proof.h"
 #include "rsa_sig_proof_util.h"
 
+#include "string.h"
+#include "cJSON.h"
+
 /**
  * Allocates space to a new proof of ownership of an RSA signature with proof_len components.
  * 
@@ -290,4 +293,116 @@ rsa_sig_proof_t *rsa_sig_proof_copy(int proof_len, rsa_sig_proof_t *proofsrc) {
     }
 
     return proofdest;
+}
+
+/**
+ * 
+ * 
+ * @param proof_len The length of the proof.
+ * @param proof The proof to be copied.
+ * 
+ * @return A new proof represented as (rsa_sig_proof_t).
+ */
+char* rsa_sig_proof2hex(int proof_len, rsa_sig_proof_t *proof) {
+
+    int i;
+    char *tmpP, *tmpC;
+    char *output;
+    cJSON *root, *proofp, *proofc, *eachproof;
+    char number[32] ={0};
+
+    /* create root node and array */
+    root = cJSON_CreateObject();
+    proofp = cJSON_CreateArray();
+    proofc = cJSON_CreateArray();
+
+
+   /* add proof array to root */
+    cJSON_AddItemToObject(root, "proofp", proofp);    
+    cJSON_AddItemToObject(root, "proofc", proofc);   
+
+    for(i = 0; i < proof_len; i++) {
+
+        tmpP = BN_bn2hex(proof->p[i]);
+        tmpC = BN_bn2hex(proof->c[i]);
+
+        sprintf(number, "%d", i);
+
+        /* add proof.p item to array proofp */
+        cJSON_AddItemToArray(proofp, eachproof = cJSON_CreateObject());
+        cJSON_AddItemToObject(eachproof, number, cJSON_CreateString(tmpP));
+        /* add proof.c item to array proofc */
+        cJSON_AddItemToArray(proofc, eachproof = cJSON_CreateObject());
+        cJSON_AddItemToObject(eachproof, number, cJSON_CreateString(tmpC));
+
+    }
+
+    output = cJSON_Print(root);
+    // printf("%s\n", output);
+    cJSON_Delete(root);
+    
+    return output;
+}
+
+/**
+ * 
+ * 
+ * @param proof_len The length of the proof.
+ * @param proof The proof to be copied.
+ * 
+ * @return A new proof represented as (rsa_sig_proof_t).
+ */
+rsa_sig_proof_t *rsa_sig_hex2proof(int proof_len, char *hexproof) {
+
+    int i;
+    // cJSON *iterator = NULL;
+    cJSON *p_array = NULL;
+    cJSON *c_array = NULL;
+    cJSON *itemP = NULL;
+    cJSON *itemC = NULL;
+    cJSON *tmpP = NULL;
+    cJSON *tmpC = NULL;
+    // char *P = NULL;
+    char number[32] ={0};
+    rsa_sig_proof_t *proof;
+
+    proof = rsa_sig_proof_new(proof_len);
+    proof->len = proof_len;
+
+    cJSON *root = cJSON_Parse(hexproof);
+    if (!cJSON_IsObject(root)) {
+        printf("hexproof is not object");
+	// 	return EXIT_FAILURE;
+	}
+
+    p_array = cJSON_GetObjectItem(root, "proofp");
+	if (!cJSON_IsArray(p_array)) {
+        printf("proofp is not array");
+	}
+
+    c_array = cJSON_GetObjectItem(root, "proofc");
+	if (!cJSON_IsArray(c_array)) {
+        printf("proofc is not array");
+	}    
+
+    for(i = 0; i < proof_len; i++) {
+
+        sprintf(number, "%d", i);
+        tmpP = cJSON_GetArrayItem(p_array, i);
+        itemP = cJSON_GetObjectItem(tmpP, number);
+        // printf("P value: %s\n", itemP->valuestring);
+        if ( BN_hex2bn(&proof->p[i], itemP->valuestring) == 0 ) {
+            printf("Error converting tmpP to proof.p");
+        }
+
+        tmpC = cJSON_GetArrayItem(c_array, i);
+        itemC = cJSON_GetObjectItem(tmpC, number);
+        // printf("C value: %s\n", itemC->valuestring);
+        if ( BN_hex2bn(&proof->c[i], itemC->valuestring) == 0 ) {
+            printf("Error converting tmpP to proof.p");
+        }
+    }
+
+    cJSON_Delete(root);
+    return proof;
 }

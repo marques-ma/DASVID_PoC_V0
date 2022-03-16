@@ -36,7 +36,7 @@ import (
 	"github.com/spiffe/go-spiffe/v2/spiffetls/tlsconfig"
 
 	// dasvid lib
-	// dasvid "github.com/marco-developer/dasvid/poclib"
+	dasvid "github.com/marco-developer/dasvid/poclib"
 	
 )
 
@@ -188,6 +188,7 @@ func Get_balanceHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Contact Asserting Workload /introspect and retrieve a ZKP proving OAuth token signature
 	var introspectrsp FileContents
 	introspectrsp = introspect(r.FormValue("DASVID"), *client)
 	if introspectrsp.Returnmsg != "" {
@@ -195,15 +196,15 @@ func Get_balanceHandler(w http.ResponseWriter, r *http.Request) {
 		json.NewEncoder(w).Encode(introspectrsp)
 	}
 
-	// var vkey *C.EVP_PKEY
-	// tmpvkey := dasvid.Token2vkey(r.FormValue("DASVID"), 1)
-	// // vkey = dasvid.Token2vkey(r.FormValue("DASVID"), 1)
+	// Create OpenSSL vkey using DASVID
+	tmpvkey := dasvid.Token2vkey(r.FormValue("DASVID"), 1)
 
-	// hexresult := dasvid.VerifyHexProof(introspectrsp.ZKP, introspectrsp.Msg, tmpvkey)
-	// if hexresult == false {
-	// 	log.Fatal("Error verifying hexproof!!")
-	// }
-	// log.Println("Success verifying hexproof!")
+	// Verify /introspect response correctness.
+	hexresult := dasvid.VerifyHexProof(introspectrsp.ZKP, introspectrsp.Msg, tmpvkey)
+	if hexresult == false {
+		log.Fatal("Error verifying hexproof!!")
+	}
+	log.Println("Success verifying hexproof in middle-tier!!")
 
 	// Access Target WL and request DASVID user balance
 	endpoint = "https://"+TargetwlIP+"/get_balance?DASVID="+r.FormValue("DASVID")

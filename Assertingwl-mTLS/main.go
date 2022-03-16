@@ -225,19 +225,14 @@ func MintHandler(w http.ResponseWriter, r *http.Request) {
 
 			// Gen ZKP
 			// 
-			// Need to move this to INTROSPECT ENDPOINT with necessary adaptions.
-			// 
 			// About format:
-			// received proof = base64(length.hexa(proof.p).hexa(proof.c))
+			// received proof = json containing proof P and C arrays
 			// 
 			// validation: 
-			// - extract proof bignums with BN_hex2bn
-			// - recreate the proof in rsa_sig_proof_t data type 
-			// - Generate vkey from public key
-			// - extract bigN and bigE from vkey
-			// - generate bigSignature from signature
-			// - rsa_sig_proof_ver(proof, bigMsg, bigE, bigN)
+			// - gen vkey and extract bigN and bigE 
+			// - verifyhexproof(json proof, msg, vkey) 
 			// 
+
 			// zkp := dasvid.GenZKPproof(oauthtoken)
 			// if zkp == "" {
 			// 	log.Println("Error generating ZKP proof")
@@ -272,7 +267,6 @@ func MintHandler(w http.ResponseWriter, r *http.Request) {
 				// ZKP:						zkp,
 			}
 			
-			// Save token and ZKP (not implemented) in cache
 			// If the file doesn't exist, create it, or append to the file
 			f, err := os.OpenFile("./data/dasvid.data", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 			if err != nil {
