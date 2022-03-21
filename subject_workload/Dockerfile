@@ -4,11 +4,15 @@ FROM golang:alpine AS builder
 
 # Set environmet variables
 ENV GO111MODULE=on \
-    CGO_ENABLED=0 \
+    CGO_ENABLED=1 \
     GOOS=linux \
-    GOARCH=amd64
-
-LABEL "type"="subjectwl"
+    GOARCH=amd64 \
+    GCCGO=gccgo \
+    CGO_CFLAGS="-g -O2" \
+    CGO_CXXFLAGS="-g -O2" \
+    CGO_FFLAGS="-g -O2" \
+    CGO_LDFLAGS="-g -O2" \
+    CC="gcc"
 
 # Create and move to working directory
 RUN mkdir /build
@@ -18,6 +22,16 @@ WORKDIR /build
 COPY . .
 
 # Download dependencies
+RUN apk upgrade --update-cache --available && \
+    apk add openssl
+RUN apk add git zip curl wget ca-certificates
+RUN apk add xxd
+RUN apk add sed
+RUN apk add jq
+RUN apk add openssl-dev
+RUN apk add build-base
+RUN apk add pkgconfig
+
 RUN go mod download
 
 RUN go build -o main .
@@ -26,12 +40,16 @@ RUN go build -o main .
 # Define the running base image 
 FROM alpine 
 
+LABEL "type"="subjectwl"
+
 ### Set working directory  
 RUN mkdir /build
 WORKDIR /build
 
 ### Copy in built application and other files
 COPY --from=builder /build /build
+RUN chmod +x ./poclib/jwk2der.sh
+RUN apk add --no-cache bash
 
 # Export necessary port
 EXPOSE 8085
