@@ -15,8 +15,8 @@ import (
 	"net"
 	"context"
 	"time"
-	// "strconv"
-
+	"bufio"
+	"strings"
 
 	"github.com/spiffe/go-spiffe/v2/spiffeid"
 	"github.com/spiffe/go-spiffe/v2/spiffetls/tlsconfig"
@@ -40,16 +40,7 @@ var (
 	sessionStore = sessions.NewCookieStore([]byte("okta-hosted-login-session-store"))
 	state        = generateState()
 	nonce        = "NonceNotSetYet"
-	
-)
 
-const (
-	// Workload API socket path
-	socketPath   	= "unix:///tmp/spire-agent/public/api.sock"
-	HostIP 			= "192.168.0.5:8080"
-	AssertingwlIP 	= "192.168.0.5:8443" 
-	TargetwlIP		= "192.168.0.5:8444"
-	MiddletierIP	= "192.168.0.5:8445"
 )
 
 type Exchange struct {
@@ -131,7 +122,7 @@ func timeTrack(start time.Time, name string) {
 func main() {
 
 	// sessionStore.Options.MaxAge = 180
-	oktaUtils.ParseEnvironment()
+	ParseEnvironment()
 
 	// Retrieve local IP
 	uri := GetOutboundIP(":8080")
@@ -167,7 +158,7 @@ func HomeHandler(w http.ResponseWriter, r *http.Request) {
 	strAT := fmt.Sprintf("%v", session.Values["access_token"])
 	
 	Data = PocData{
-		AppURI:			 HostIP,
+		AppURI:			 os.Getenv("HOSTIP"),
 		Profile:         getProfileData(r),
 		IsAuthenticated: isAuthenticated(r),
 		HaveDASVID:		 haveDASVID(),
@@ -187,7 +178,8 @@ func LoginHandler(w http.ResponseWriter, r *http.Request) {
 	// Retrieve local IP
 	// Must be authorized in OKTA configuration.
 	// Hard coded here to allow the redirection to subj wl container
-	uri := "http://" + HostIP + "/callback"
+	uri := "http://" + os.Getenv("HOSTIP") + "/callback"
+	fmt.Println("URI: ", uri )
 	
 	nonce, _ = oktaUtils.GenerateNonce()
 	var redirectPath string
@@ -254,7 +246,7 @@ func ProfileHandler(w http.ResponseWriter, r *http.Request) {
 	defer timeTrack(time.Now(), "Profile Handler")
 
 	Data = PocData{
-		AppURI:			 HostIP,
+		AppURI:			 os.Getenv("HOSTIP"),
 		Profile:         getProfileData(r),
 		IsAuthenticated: isAuthenticated(r),
 		HaveDASVID:		 haveDASVID(),
@@ -277,7 +269,7 @@ func AccountHandler(w http.ResponseWriter, r *http.Request) {
 		returnmsg := "Oauth token validation error"
 
 		Data = PocData{
-			AppURI:					HostIP,
+			AppURI:					os.Getenv("HOSTIP"),
 			Profile:         		getProfileData(r),
 			IsAuthenticated: 		isAuthenticated(r),
 			Returnmsg: 				returnmsg,
@@ -293,7 +285,7 @@ func AccountHandler(w http.ResponseWriter, r *http.Request) {
 		dasvidclaims := dasvid.ParseTokenClaims(os.Getenv("DASVIDToken"))
 
 		Data = PocData{
-			AppURI:					HostIP,
+			AppURI:					os.Getenv("HOSTIP"),
 			Profile:         		getProfileData(r),
 			IsAuthenticated: 		isAuthenticated(r),
 			DASVIDToken:			temp.DASVIDToken,
@@ -316,7 +308,7 @@ func Get_balanceHandler(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	source, err := workloadapi.NewX509Source(ctx, workloadapi.WithClientOptions(workloadapi.WithAddr(socketPath)))
+	source, err := workloadapi.NewX509Source(ctx, workloadapi.WithClientOptions(workloadapi.WithAddr(os.Getenv("SOCKET_PATH"))))
 	if err != nil {
 		log.Fatalf("Unable to create X509Source %v", err)
 	}
@@ -335,11 +327,11 @@ func Get_balanceHandler(w http.ResponseWriter, r *http.Request) {
 
 	dasvidclaims := dasvid.ParseTokenClaims(os.Getenv("DASVIDToken"))
 
-	endpoint := "https://"+MiddletierIP+"/get_balance?DASVID="+os.Getenv("DASVIDToken")
+	endpoint := "https://"+os.Getenv("MIDDLETIERIP")+"/get_balance?DASVID="+os.Getenv("DASVIDToken")
 
 	response, err := client.Get(endpoint)
 	if err != nil {
-		log.Fatalf("Error connecting to %q: %v", MiddletierIP, err)
+		log.Fatalf("Error connecting to %q: %v", os.Getenv("TARGETWLIP"), err)
 	}
 
 	defer response.Body.Close()
@@ -358,7 +350,7 @@ func Get_balanceHandler(w http.ResponseWriter, r *http.Request) {
 		
 		fmt.Println("Return msg error:", funds.Returnmsg)
 		Data = PocData{
-			AppURI:					HostIP,
+			AppURI:					os.Getenv("HOSTIP"),
 			Profile:         		getProfileData(r),
 			IsAuthenticated: 		isAuthenticated(r),
 			HaveDASVID:				haveDASVID(),
@@ -370,7 +362,7 @@ func Get_balanceHandler(w http.ResponseWriter, r *http.Request) {
 	} else {
 
 		Data = PocData{
-			AppURI:					HostIP,
+			AppURI:					os.Getenv("HOSTIP"),
 			Profile:         		getProfileData(r),
 			IsAuthenticated: 		isAuthenticated(r),
 			DASVIDClaims:			dasvidclaims,
@@ -393,7 +385,7 @@ func DepositHandler(w http.ResponseWriter, r *http.Request) {
 
 	dasvidclaims := dasvid.ParseTokenClaims(os.Getenv("DASVIDToken"))
 
-	source, err := workloadapi.NewX509Source(ctx, workloadapi.WithClientOptions(workloadapi.WithAddr(socketPath)))
+	source, err := workloadapi.NewX509Source(ctx, workloadapi.WithClientOptions(workloadapi.WithAddr(os.Getenv("SOCKET_PATH"))))
 	if err != nil {
 		log.Fatalf("Unable to create X509Source %v", err)
 	}
@@ -410,11 +402,11 @@ func DepositHandler(w http.ResponseWriter, r *http.Request) {
 		},
 	}
 
-	endpoint := "https://"+MiddletierIP+"/deposit?DASVID="+os.Getenv("DASVIDToken")+"&deposit="+r.FormValue("deposit")
+	endpoint := "https://"+os.Getenv("MIDDLETIERIP")+"/deposit?DASVID="+os.Getenv("DASVIDToken")+"&deposit="+r.FormValue("deposit")
 
 	response, err := client.Get(endpoint)
 	if err != nil {
-		log.Fatalf("Error connecting to %q: %v", MiddletierIP, err)
+		log.Fatalf("Error connecting to %q: %v", os.Getenv("MIDDLETIERIP"), err)
 	}
 
 	defer response.Body.Close()
@@ -433,7 +425,7 @@ func DepositHandler(w http.ResponseWriter, r *http.Request) {
 
 		fmt.Println("Return msg error:", funds.Returnmsg)
 		Data = PocData{
-			AppURI:					HostIP,
+			AppURI:					os.Getenv("HOSTIP"),
 			Profile:         		getProfileData(r),
 			IsAuthenticated: 		isAuthenticated(r),
 			HaveDASVID:				haveDASVID(),
@@ -445,7 +437,7 @@ func DepositHandler(w http.ResponseWriter, r *http.Request) {
 	} else {
 
 		Data = PocData{
-			AppURI:					HostIP,
+			AppURI:					os.Getenv("HOSTIP"),
 			Profile:         		getProfileData(r),
 			IsAuthenticated: 		isAuthenticated(r),
 			DASVIDClaims:			dasvidclaims,
@@ -477,7 +469,7 @@ func exchangeCode(code string, r *http.Request) Exchange {
 	defer timeTrack(time.Now(), "Exchange OKTA Oauth code")
 
 	// Retrieve local IP
-	uri := "http://" + HostIP + "/callback"
+	uri := "http://" + os.Getenv("HOSTIP") + "/callback"
 
 	authHeader := base64.StdEncoding.EncodeToString(
 		[]byte(os.Getenv("CLIENT_ID") + ":" + os.Getenv("CLIENT_SECRET")))
@@ -585,7 +577,7 @@ func getdasvid(oauthtoken string) (string) {
 	defer cancel()
 
 	// Create a `workloadapi.X509Source`, it will connect to Workload API using provided socket path
-	source, err := workloadapi.NewX509Source(ctx, workloadapi.WithClientOptions(workloadapi.WithAddr(socketPath)))
+	source, err := workloadapi.NewX509Source(ctx, workloadapi.WithClientOptions(workloadapi.WithAddr(os.Getenv("SOCKET_PATH"))))
 	if err != nil {
 		log.Fatalf("Unable to create X509Source %v", err)
 	}
@@ -605,11 +597,11 @@ func getdasvid(oauthtoken string) (string) {
 	var endpoint string
 	token := os.Getenv("oauthtoken")
 	fmt.Println("OAuth Token: ", token)
-	endpoint = "https://"+AssertingwlIP+"/mint?AccessToken="+token
+	endpoint = "https://"+os.Getenv("ASSERTINGWLIP")+"/mint?AccessToken="+token
 
 	r, err := client.Get(endpoint)
 	if err != nil {
-		log.Fatalf("Error connecting to %q: %v", AssertingwlIP, err)
+		log.Fatalf("Error connecting to %q: %v", os.Getenv("ASSERTINGWLIP"), err)
 	}
 
 	defer r.Body.Close()
@@ -619,4 +611,98 @@ func getdasvid(oauthtoken string) (string) {
 	}
 
 	return fmt.Sprintf("%s", body)
+}
+
+func ParseEnvironment() {
+
+	if _, err := os.Stat(".cfg"); os.IsNotExist(err) {
+		log.Printf("Config file (.cfg) is not present.  Relying on Global Environment Variables")
+	}
+
+	setEnvVariable("SOCKET_PATH", os.Getenv("SOCKET_PATH"))
+	if os.Getenv("SOCKET_PATH") == "" {
+		log.Printf("Could not resolve a SOCKET_PATH environment variable.")
+		// os.Exit(1)
+	}
+
+	setEnvVariable("PROOF_LEN", os.Getenv("PROOF_LEN"))
+	if os.Getenv("PROOF_LEN") == "" {
+		log.Printf("Could not resolve a PROOF_LEN environment variable.")
+		// os.Exit(1)
+	}
+
+	setEnvVariable("PEM_PATH", os.Getenv("PEM_PATH"))
+	if os.Getenv("PEM_PATH") == "" {
+		log.Printf("Could not resolve a PEM_PATH environment variable.")
+		// os.Exit(1)
+	}
+
+	setEnvVariable("MINT_ZKP", os.Getenv("MINT_ZKP"))
+	if os.Getenv("MINT_ZKP") == "" {
+		log.Printf("Could not resolve a MINT_ZKP environment variable.")
+		// os.Exit(1)
+	}
+
+	// Set client APP environment
+	setEnvVariable("CLIENT_ID", os.Getenv("CLIENT_ID"))
+	if os.Getenv("CLIENT_ID") == "" {
+		log.Printf("Could not resolve a CLIENT_ID environment variable.")
+		os.Exit(1)
+	}
+
+	setEnvVariable("CLIENT_SECRET", os.Getenv("CLIENT_SECRET"))
+	if os.Getenv("CLIENT_SECRET") == "" {
+		log.Printf("Could not resolve a CLIENT_SECRET environment variable.")
+		os.Exit(1)
+	}
+
+	setEnvVariable("ISSUER", os.Getenv("ISSUER"))
+	if os.Getenv("ISSUER") == "" {
+		log.Printf("Could not resolve a ISSUER environment variable.")
+		os.Exit(1)
+	}
+
+	setEnvVariable("HOSTIP", os.Getenv("HOSTIP"))
+	if os.Getenv("HOSTIP") == "" {
+		log.Printf("Could not resolve a HOSTIP environment variable.")
+		os.Exit(1)
+	}
+
+	setEnvVariable("ASSERTINGWLIP", os.Getenv("ASSERTINGWLIP"))
+	if os.Getenv("ASSERTINGWLIP") == "" {
+		log.Printf("Could not resolve a ASSERTINGWLIP environment variable.")
+		os.Exit(1)
+	}
+
+	setEnvVariable("TARGETWLIP", os.Getenv("TARGETWLIP"))
+	if os.Getenv("TARGETWLIP") == "" {
+		log.Printf("Could not resolve a TARGETWLIP environment variable.")
+		os.Exit(1)
+	}
+
+	setEnvVariable("MIDDLETIERIP", os.Getenv("MIDDLETIERIP"))
+	if os.Getenv("MIDDLETIERIP") == "" {
+		log.Printf("Could not resolve a MIDDLETIERIP environment variable.")
+		os.Exit(1)
+	}
+}
+
+func setEnvVariable(env string, current string) {
+	if current != "" {
+		return
+	}
+
+	file, _ := os.Open(".cfg")
+	defer file.Close()
+
+	lookInFile := bufio.NewScanner(file)
+	lookInFile.Split(bufio.ScanLines)
+
+	for lookInFile.Scan() {
+		parts := strings.Split(lookInFile.Text(), "=")
+		key, value := parts[0], parts[1]
+		if key == env {
+			os.Setenv(key, value)
+		}
+	}
 }

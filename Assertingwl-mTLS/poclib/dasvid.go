@@ -59,13 +59,6 @@ import (
 	"github.com/spiffe/go-spiffe/v2/bundle/x509bundle"
 )
 
-func init() {
-
-	// parse environment for package configuration (.cfg)
-	ParseEnvironment(0)
-
-}
-
 type SVID struct {
 	// ID is the SPIFFE ID of the X509-SVID.
 	ID spiffeid.ID
@@ -554,61 +547,4 @@ func ValidateISS(issuer string) (uri string, result bool) {
 		return issuer+"/v1/keys", true	
 	}
 	return "", false
-}
-
-func ParseEnvironment(caller int) {
-
-	if _, err := os.Stat(".cfg"); os.IsNotExist(err) {
-		log.Printf("Config file (.cfg) is not present.  Relying on Global Environment Variables")
-	}
-
-	if caller == 0 {
-		// internal call from dasvid pkg
-
-		setEnvVariable("PROOF_LEN", os.Getenv("PROOF_LEN"))
-		setEnvVariable("PEM_PATH", os.Getenv("PEM_PATH"))
-
-		if os.Getenv("PROOF_LEN") == "" {
-			log.Printf("Could not resolve a PROOF_LEN environment variable.")
-			// os.Exit(1)
-		}
-	
-		if os.Getenv("PEM_PATH") == "" {
-			log.Printf("Could not resolve a PEM_PATH environment variable.")
-			// os.Exit(1)
-		}
-	}
-
-	setEnvVariable("SOCKET_PATH", os.Getenv("SOCKET_PATH"))
-	setEnvVariable("MINT_ZKP", os.Getenv("MINT_ZKP"))
-
-	if os.Getenv("SOCKET_PATH") == "" {
-		log.Printf("Could not resolve a SOCKET_PATH environment variable.")
-		// os.Exit(1)
-	}
-
-	if os.Getenv("MINT_ZKP") == "" {
-		log.Printf("Could not resolve a MINT_ZKP environment variable.")
-		// os.Exit(1)
-	}
-}
-
-func setEnvVariable(env string, current string) {
-	if current != "" {
-		return
-	}
-
-	file, _ := os.Open(".cfg")
-	defer file.Close()
-
-	lookInFile := bufio.NewScanner(file)
-	lookInFile.Split(bufio.ScanLines)
-
-	for lookInFile.Scan() {
-		parts := strings.Split(lookInFile.Text(), "=")
-		key, value := parts[0], parts[1]
-		if key == env {
-			os.Setenv(key, value)
-		}
-	}
 }

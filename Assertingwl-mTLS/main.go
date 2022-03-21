@@ -31,7 +31,7 @@ import (
 	"context"
 	"io"
 	"time"
-	// "bufio"
+	"bufio"
 	"io/ioutil"
 
 	// SPIFFE
@@ -77,7 +77,7 @@ func timeTrack(start time.Time, name string) {
 func main() {
 
 	// Parse environment for asserting workload main
-	dasvid.ParseEnvironment(1)
+	ParseEnvironment()
 	
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -396,5 +396,53 @@ func IntrospectHandler(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode("DASVID not found")
 }
 
+func ParseEnvironment() {
 
+	if _, err := os.Stat(".cfg"); os.IsNotExist(err) {
+		log.Printf("Config file (.cfg) is not present.  Relying on Global Environment Variables")
+	}
+
+	setEnvVariable("PROOF_LEN", os.Getenv("PROOF_LEN"))
+	if os.Getenv("PROOF_LEN") == "" {
+		log.Printf("Could not resolve a PROOF_LEN environment variable.")
+		// os.Exit(1)
+	}
+
+	setEnvVariable("PEM_PATH", os.Getenv("PEM_PATH"))
+	if os.Getenv("PEM_PATH") == "" {
+		log.Printf("Could not resolve a PEM_PATH environment variable.")
+		// os.Exit(1)
+	}
+		setEnvVariable("MINT_ZKP", os.Getenv("MINT_ZKP"))
+	if os.Getenv("MINT_ZKP") == "" {
+		log.Printf("Could not resolve a MINT_ZKP environment variable.")
+		// os.Exit(1)
+	}
+
+	setEnvVariable("SOCKET_PATH", os.Getenv("SOCKET_PATH"))
+	if os.Getenv("SOCKET_PATH") == "" {
+		log.Printf("Could not resolve a SOCKET_PATH environment variable.")
+		// os.Exit(1)
+	}
+}
+
+func setEnvVariable(env string, current string) {
+	if current != "" {
+		return
+	}
+
+	file, _ := os.Open(".cfg")
+	defer file.Close()
+
+	lookInFile := bufio.NewScanner(file)
+	lookInFile.Split(bufio.ScanLines)
+
+	for lookInFile.Scan() {
+		parts := strings.Split(lookInFile.Text(), "=")
+		key, value := parts[0], parts[1]
+		if key == env {
+			os.Setenv(key, value)
+		}
+	}
+}
 

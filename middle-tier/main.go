@@ -29,6 +29,9 @@ import (
 	"io/ioutil"
 	"time"
 	"net"
+	"os"
+	"bufio"
+	"strings"
 	
 	// SPIFFE
 	"github.com/spiffe/go-spiffe/v2/workloadapi"
@@ -64,19 +67,15 @@ type Balancetemp struct {
 
 var temp Contents
 
-const (
-	socketPath    = "unix:///tmp/spire-agent/public/api.sock"
-	// Define local environment settings
-	AssertingwlIP 	= "192.168.0.5:8443" 
-	TargetwlIP		= "192.168.0.5:8444"
-)
-
 func timeTrack(start time.Time, name string) {
     elapsed := time.Since(start)
     log.Printf("%s execution time is %s", name, elapsed)
 }
 
 func main() {
+
+	ParseEnvironment()
+	
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -84,7 +83,7 @@ func main() {
 	http.HandleFunc("/deposit", DepositHandler)
 
 	// Create a `workloadapi.X509Source`, it will connect to Workload API using provided socket.
-	source, err := workloadapi.NewX509Source(ctx, workloadapi.WithClientOptions(workloadapi.WithAddr(socketPath)))
+	source, err := workloadapi.NewX509Source(ctx, workloadapi.WithClientOptions(workloadapi.WithAddr(os.Getenv("SOCKET_PATH"))))
 	if err != nil {
 		log.Fatalf("Unable to create X509Source: %v", err)
 	}
@@ -117,7 +116,7 @@ func Get_balanceHandler(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 
 	// Create a `workloadapi.X509Source`, it will connect to Workload API using provided socket path
-	source, err := workloadapi.NewX509Source(ctx, workloadapi.WithClientOptions(workloadapi.WithAddr(socketPath)))
+	source, err := workloadapi.NewX509Source(ctx, workloadapi.WithClientOptions(workloadapi.WithAddr(os.Getenv("SOCKET_PATH"))))
 	if err != nil {
 		log.Fatalf("Unable to create X509Source %v", err)
 	}
@@ -136,11 +135,11 @@ func Get_balanceHandler(w http.ResponseWriter, r *http.Request) {
 
 	// Validate DASVID
 	datoken := r.FormValue("DASVID")
-	endpoint := "https://"+AssertingwlIP+"/validate?DASVID="+datoken
+	endpoint := "https://"+os.Getenv("ASSERTINGWLIP")+"/validate?DASVID="+datoken
 
 	response, err := client.Get(endpoint)
 	if err != nil {
-		log.Fatalf("Error connecting to %q: %v", AssertingwlIP, err)
+		log.Fatalf("Error connecting to %q: %v", os.Getenv("ASSERTINGWLIP"), err)
 	}
 
 	defer response.Body.Close()
@@ -207,11 +206,11 @@ func Get_balanceHandler(w http.ResponseWriter, r *http.Request) {
 	log.Println("Success verifying hexproof in middle-tier!!")
 
 	// Access Target WL and request DASVID user balance
-	endpoint = "https://"+TargetwlIP+"/get_balance?DASVID="+r.FormValue("DASVID")
+	endpoint = "https://"+os.Getenv("TARGETWLIP")+"/get_balance?DASVID="+r.FormValue("DASVID")
 
 	response, err = client.Get(endpoint)
 	if err != nil {
-		log.Fatalf("Error connecting to %q: %v", TargetwlIP, err)
+		log.Fatalf("Error connecting to %q: %v", os.Getenv("TARGETWLIP"), err)
 	}
 
 	defer response.Body.Close()
@@ -240,7 +239,7 @@ func DepositHandler(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 
 	// Create a `workloadapi.X509Source`, it will connect to Workload API using provided socket path
-	source, err := workloadapi.NewX509Source(ctx, workloadapi.WithClientOptions(workloadapi.WithAddr(socketPath)))
+	source, err := workloadapi.NewX509Source(ctx, workloadapi.WithClientOptions(workloadapi.WithAddr(os.Getenv("SOCKET_PATH"))))
 	if err != nil {
 		log.Fatalf("Unable to create X509Source %v", err)
 	}
@@ -258,11 +257,11 @@ func DepositHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Validate DASVID
-	endpoint := "https://"+AssertingwlIP+"/validate?DASVID="+r.FormValue("DASVID")
+	endpoint := "https://"+os.Getenv("ASSERTINGWLIP")+"/validate?DASVID="+r.FormValue("DASVID")
 
 	response, err := client.Get(endpoint)
 	if err != nil {
-		log.Fatalf("Error connecting to %q: %v", AssertingwlIP, err)
+		log.Fatalf("Error connecting to %q: %v", os.Getenv("ASSERTINGWLIP"), err)
 	}
 
 	defer response.Body.Close()
@@ -310,6 +309,7 @@ func DepositHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Contact Asserting Workload /introspect and retrieve a ZKP proving OAuth token signature
 	var introspectrsp FileContents
 	introspectrsp = introspect(r.FormValue("DASVID"), *client)
 	if introspectrsp.Returnmsg != "" {
@@ -317,19 +317,22 @@ func DepositHandler(w http.ResponseWriter, r *http.Request) {
 		json.NewEncoder(w).Encode(introspectrsp)
 	}
 
-	// vkey := dasvid.Token2vkey(r.FormValue("DASVID"), 1)
+	// Create OpenSSL vkey using DASVID
+	tmpvkey := dasvid.Token2vkey(r.FormValue("DASVID"), 1)
 
-	// hexresult := dasvid.VerifyHexProof(introspectrsp.ZKP, introspectrsp.Msg, vkey)
-	// if hexresult == false {
-	// 	log.Fatal("Error verifying hexproof!!")
-	// }
+	// Verify /introspect response correctness.
+	hexresult := dasvid.VerifyHexProof(introspectrsp.ZKP, introspectrsp.Msg, tmpvkey)
+	if hexresult == false {
+		log.Fatal("Error verifying hexproof!!")
+	}
+	log.Println("Success verifying hexproof in middle-tier!!")
 
 	// Gera chamada para target workload 
-	endpoint = "https://"+TargetwlIP+"/deposit?DASVID="+r.FormValue("DASVID")+"&deposit="+r.FormValue("deposit")
+	endpoint = "https://"+os.Getenv("TARGETWLIP")+"/deposit?DASVID="+r.FormValue("DASVID")+"&deposit="+r.FormValue("deposit")
 
 	response, err = client.Get(endpoint)
 	if err != nil {
-		log.Fatalf("Error connecting to %q: %v", TargetwlIP, err)
+		log.Fatalf("Error connecting to %q: %v", os.Getenv("TARGETWLIP"), err)
 	}
 
 	defer response.Body.Close()
@@ -367,11 +370,11 @@ func introspect(datoken string, client http.Client) (introspectrsp FileContents)
 	// var returnmsg string
 	var rcvresp FileContents
 
-	endpoint := "https://"+AssertingwlIP+"/introspect?DASVID="+datoken
+	endpoint := "https://"+os.Getenv("ASSERTINGWLIP")+"/introspect?DASVID="+datoken
 
 	response, err := client.Get(endpoint)
 	if err != nil {
-		log.Fatalf("Error connecting to %q: %v", AssertingwlIP, err)
+		log.Fatalf("Error connecting to %q: %v", os.Getenv("ASSERTINGWLIP"), err)
 	}
 
 	defer response.Body.Close()
@@ -393,4 +396,67 @@ func introspect(datoken string, client http.Client) (introspectrsp FileContents)
 	}
 
 	return introspectrsp
+}
+
+
+func ParseEnvironment() {
+
+	if _, err := os.Stat(".cfg"); os.IsNotExist(err) {
+		log.Printf("Config file (.cfg) is not present.  Relying on Global Environment Variables")
+	}
+
+	setEnvVariable("SOCKET_PATH", os.Getenv("SOCKET_PATH"))
+	if os.Getenv("SOCKET_PATH") == "" {
+		log.Printf("Could not resolve a SOCKET_PATH environment variable.")
+		// os.Exit(1)
+	}
+
+	setEnvVariable("ASSERTINGWLIP", os.Getenv("ASSERTINGWLIP"))
+	if os.Getenv("ASSERTINGWLIP") == "" {
+		log.Printf("Could not resolve a ASSERTINGWLIP environment variable.")
+		// os.Exit(1)
+	}
+
+	setEnvVariable("TARGETWLIP", os.Getenv("TARGETWLIP"))
+	if os.Getenv("TARGETWLIP") == "" {
+		log.Printf("Could not resolve a TARGETWLIP environment variable.")
+		// os.Exit(1)
+	}
+
+	setEnvVariable("PROOF_LEN", os.Getenv("PROOF_LEN"))
+	if os.Getenv("PROOF_LEN") == "" {
+		log.Printf("Could not resolve a PROOF_LEN environment variable.")
+		// os.Exit(1)
+	}
+
+	setEnvVariable("PEM_PATH", os.Getenv("PEM_PATH"))
+	if os.Getenv("PEM_PATH") == "" {
+		log.Printf("Could not resolve a PEM_PATH environment variable.")
+		// os.Exit(1)
+	}
+		setEnvVariable("MINT_ZKP", os.Getenv("MINT_ZKP"))
+	if os.Getenv("MINT_ZKP") == "" {
+		log.Printf("Could not resolve a MINT_ZKP environment variable.")
+		// os.Exit(1)
+	}
+}
+
+func setEnvVariable(env string, current string) {
+	if current != "" {
+		return
+	}
+
+	file, _ := os.Open(".cfg")
+	defer file.Close()
+
+	lookInFile := bufio.NewScanner(file)
+	lookInFile.Split(bufio.ScanLines)
+
+	for lookInFile.Scan() {
+		parts := strings.Split(lookInFile.Text(), "=")
+		key, value := parts[0], parts[1]
+		if key == env {
+			os.Setenv(key, value)
+		}
+	}
 }
