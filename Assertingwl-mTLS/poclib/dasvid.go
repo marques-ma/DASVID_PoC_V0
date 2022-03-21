@@ -27,6 +27,7 @@ import (
 	"fmt"
 	"log"
 	"unsafe"
+	"strconv"
 		
 	// To sig. validation 
 	"crypto"
@@ -57,15 +58,12 @@ import (
 	"github.com/spiffe/go-spiffe/v2/bundle/x509bundle"
 )
 
-// Worload API socket path
-const (
-	socketPath 	= "unix:///tmp/spire-agent/public/api.sock"
-	// set path to OAuth PEM public key file 
-	path 			= "./keys/oauth.pem"
-	hexpath 		= "./data/hexproofs.data"
-	//  proof_len The number of components in the proof.
-	proof_len 	= 80
-)
+func init() {
+
+	// parse environment for package configuration (.cfg)
+	ParseEnvironment(0)
+
+}
 
 type SVID struct {
 	// ID is the SPIFFE ID of the X509-SVID.
@@ -108,9 +106,7 @@ func timeTrack(start time.Time, name string) {
     log.Printf("%s execution time is %s", name, elapsed)
 }
 
-
 func VerifySignature(jwtToken string, key JWK) error {
-
 	defer timeTrack(time.Now(), "Verify Signature")
 
 	parts := strings.Split(jwtToken, ".")
@@ -140,7 +136,8 @@ func VerifySignature(jwtToken string, key JWK) error {
 	return err
 }
 
-func Mintdasvid(iss string, sub string, dpa string, dpr string, key interface{}) string{
+func Mintdasvid(iss string, sub string, dpa string, dpr string, oam []byte, zkp string, key interface{}) string{
+	defer timeTrack(time.Now(), "Mintdasvid")
 
 	flag.CommandLine = flag.NewFlagSet(os.Args[0], flag.ExitOnError)
 
@@ -155,26 +152,43 @@ func Mintdasvid(iss string, sub string, dpa string, dpr string, key interface{})
 	subj := flag.String("sub", sub, "subject (sub) = the identity about which the assertion is being made. Subject workload's SPIFFE ID.")
 	dlpa := flag.String("dpa", dpa, "delegated authority (dpa) = ")
 	dlpr := flag.String("dpr", dpr, "delegated principal (dpr) = The Principal")
-	// oam  := flag.String("oam", oauthmsg, "Oauth token without signature part")
-	// proof := flag.String("zkp", zkp, "OAuth Zero-Knowledge-Proof")
+
+	 
+	// Build Token
+	var token *mint.Token
+
+	if (oam != nil && zkp != "") {
+		oam  := flag.String("oam", string(oam), "Oauth token without signature part")
+		proof := flag.String("zkp", zkp, "OAuth Zero-Knowledge-Proof")
+
+		token = mint.NewWithClaims(mint.SigningMethodRS256, mint.MapClaims{
+			"exp": *exp,
+			"iss": *issuer,
+			"aat": *assert,
+			"sub": *subj,
+			"dpa": *dlpa,
+			"dpr": *dlpr,
+			"zkp": map[string]interface{}{ 
+				"msg": oam,
+				"proof": proof,
+			},
+			"iat": issue_time,
+		})
+
+	} else {
+		token = mint.NewWithClaims(mint.SigningMethodRS256, mint.MapClaims{
+			"exp": *exp,
+			"iss": *issuer,
+			"aat": *assert,
+			"sub": *subj,
+			"dpa": *dlpa,
+			"dpr": *dlpr,
+			"iat": issue_time,
+		})
+	}
  
 	flag.Parse()
- 
-	// Build Token
-	token := mint.NewWithClaims(mint.SigningMethodRS256, mint.MapClaims{
-		"exp": *exp,
-		"iss": *issuer,
-		"aat": *assert,
-		"sub": *subj,
-		"dpa": *dlpa,
-		"dpr": *dlpr,
-		// "zkp": map[string]interface{}{ 
-		// 	"msg": oam,
-		// 	"proof": proof,
-		// },
-		"iat": issue_time,
-	})
- 
+
 	// Sign Token
  	tokenString, err := token.SignedString(key)
  	if err != nil {
@@ -185,7 +199,6 @@ func Mintdasvid(iss string, sub string, dpa string, dpr string, key interface{})
 }
 
 func ParseTokenClaims(strAT string) map[string]interface{} {
-
 	defer timeTrack(time.Now(), "Parse token claims")
 
 		// Parse access token without validating signature
@@ -200,7 +213,6 @@ func ParseTokenClaims(strAT string) map[string]interface{} {
 }
 
 func ValidateTokenExp(claims map[string]interface{}) (expresult bool, remainingtime string) {
-
 	defer timeTrack(time.Now(), "Validate token exp")
 
 	tm := time.Unix(int64(claims["exp"].(float64)), 0)
@@ -217,7 +229,7 @@ func ValidateTokenExp(claims map[string]interface{}) (expresult bool, remainingt
 }
 
 func RetrievePrivateKey(path string) interface{} {
-
+	defer timeTrack(time.Now(), "RetrievePrivateKey")
 	// Open file containing private Key
 	privateKeyFile, err := os.Open(path)
 	if err != nil {
@@ -242,7 +254,7 @@ func RetrievePrivateKey(path string) interface{} {
 }
 
 func RetrievePEMPublicKey(path string) interface{} {
-
+	defer timeTrack(time.Now(), "RetrievePEMPublicKey")
 	// Open file containing public Key
 	publicKeyFile, err := os.Open(path)
 	if err != nil {
@@ -279,6 +291,7 @@ func RetrievePEMPublicKey(path string) interface{} {
 }
 
 func RetrieveDERPublicKey(path string) []byte {
+	defer timeTrack(time.Now(), "RetrieveDERPublicKey")
 
 	// Open file containing public Key
 	publicKeyFile, err := os.Open(path)
@@ -316,8 +329,9 @@ func RetrieveDERPublicKey(path string) []byte {
 }
 
 func RetrieveJWKSPublicKey(path string) JWKS {
+	defer timeTrack(time.Now(), "RetrieveJWKSPublicKey")
 	// Open file containing the keys obtained from /keys endpoint
-	// NOTE: Needs to implement cache and retrieve processes
+	// NOTE: A cache file could be useful
 	jwksFile, err := os.Open(path)
 	if err != nil {
 		log.Printf("Error reading jwks file: %v", err)
@@ -342,7 +356,7 @@ func FetchX509SVID() *x509svid.SVID {
 	defer cancel()
 	
 	// Create a `workloadapi.X509Source`, it will connect to Workload API using provided socket.
-	source, err := workloadapi.NewX509Source(ctx, workloadapi.WithClientOptions(workloadapi.WithAddr(socketPath)))
+	source, err := workloadapi.NewX509Source(ctx, workloadapi.WithClientOptions(workloadapi.WithAddr(os.Getenv("SOCKET_PATH"))))
 	if err != nil {
 		log.Printf("Unable to create X509Source: %v", err)
 	}
@@ -359,13 +373,12 @@ func FetchX509SVID() *x509svid.SVID {
 func GenZKPproof(OAuthToken string) string {
 	defer timeTrack(time.Now(), "Generate ZKP")
 
-    var vkey *C.EVP_PKEY
 	var bigN, bigE, bigSig, bigMsg *C.BIGNUM
 
     parts := strings.Split(OAuthToken, ".")
 	
-    // Extract token signature, its length and allocate sig_C
-	vkey = Token2vkey(OAuthToken, 0)
+    // Generate OpenSSL vkey using token
+	vkey := Token2vkey(OAuthToken, 0)
 
 	// Generate signature BIGNUM
 	signature, err := base64.RawURLEncoding.DecodeString(parts[2])
@@ -404,22 +417,17 @@ func GenZKPproof(OAuthToken string) string {
     }
 
     // Generate Zero Knowledge Proof
-	proof := C.rsa_sig_proof_prove((C.int)(sig_len*8), proof_len, bigSig, bigE, bigN)
+	proof_len, _ := strconv.Atoi(os.Getenv("PROOF_LEN"))
+	proof := C.rsa_sig_proof_prove((C.int)(sig_len*8), (C.int)(proof_len), bigSig, bigE, bigN)
     if( proof == nil) {
         log.Printf("Error creating proof\n")
     }
 	
 	// // Check proof correctness
-	// verification := C.rsa_sig_proof_ver(proof, bigMsg, bigE, bigN)
-	// if(verification == 0) || (verification == -1) {
-	// 	log.Println("Error verifying proof: %d \n", verification)
+	// sigproof := C.rsa_evp_sig_proof_ver(proof, (*C.uchar)(msg_C), (C.uint)(msg_len), vkey)
+	// if( sigproof != 1) {
+    //     log.Printf("Failed verifying sigproof ! \n")
     // }
-	
-	// Check proof correctness
-	sigproof := C.rsa_evp_sig_proof_ver(proof, (*C.uchar)(msg_C), (C.uint)(msg_len), vkey)
-	if( sigproof != 1) {
-        log.Printf("Failed verifying sigproof ! \n")
-    }
 
 	// results is a JSON with two arrays: proofp and proofc, containing 'n' pairs of key:value, where each value represents one proof.
 	// we can send the JSON over network and reconstruct the proof using it
@@ -432,43 +440,26 @@ func GenZKPproof(OAuthToken string) string {
 	if hexresult == false {
 		log.Fatal("Error verifying hexproof!!")
 	}
-
-	// reconstructed is working. Now just need to parse it over network
-	reconstructed := C.rsa_sig_hex2proof((C.int)(proof_len), results)
-	if reconstructed == nil {
-		fmt.Println("reconstructed nil")
-	}
-
-	// Check proof correctness
-	verification2 := C.rsa_sig_proof_ver(reconstructed, bigMsg, bigE, bigN)
-    // var ret int
-    if( verification2 == 1) {
-        log.Printf("Success verifying reconstructed!!! :DD \n")
-		// ret = 1
-    } else if( verification2 == 0) {
-		log.Printf("Failed verifying reconstructed :(( \n")
-		// ret = 0
-	} else if( verification2 == -1) {
-        log.Printf("Error verifying reconstructed :(( \n")
-		// ret = -1
-    }
 	
 	C.EVP_PKEY_free(vkey)
     return goresults
 }
 
 func VerifyHexProof(hexproof string, msg []byte, reckey *C.EVP_PKEY) bool {
+	defer timeTrack(time.Now(), "Verify ZKP")
 
 	var bigN, bigE, bigMsg *C.BIGNUM
 	bigN = C.BN_new()
 	bigE = C.BN_new()
 	bigMsg = C.BN_new()
 
+	proof_len, _ := strconv.Atoi(os.Getenv("PROOF_LEN"))
+
 	// reconstruct proof
 	hexproof_C := C.CString(hexproof)
 	reconstructed := C.rsa_sig_hex2proof((C.int)(proof_len), (*C.char)(hexproof_C))
 	if reconstructed == nil {
-		fmt.Println("reconstructed nil")
+		fmt.Println("Error: reconstructed nil")
 	}
 
 	// Generate bigMSG
@@ -487,53 +478,136 @@ func VerifyHexProof(hexproof string, msg []byte, reckey *C.EVP_PKEY) bool {
 	// Check proof correctness
 	proofcheck := C.rsa_sig_proof_ver(reconstructed, bigMsg, bigE, bigN)
 	if( proofcheck == 0) {
-		log.Printf("Failed verifying proof inside hexproof :(( \n")
+		log.Printf("VerifyHexProof failed verifying proof :( \n")
 		return false
 	} else if( proofcheck == -1) {
-        log.Printf("Error verifying proof inside hexproof :(( \n")
+        log.Printf("VerifyHexProof found an error verifying proof :( \n")
 		return false
     }
-
+	log.Printf("VerifyHexProof successfully verified the proof! :) \n")
 	return true
 }
 
-// Receive a JWT token, identify the issuer and contact /keys endpoint to retrieve JWK public key.
+// Receive a JWT token, identify the original OAuth token issuer and contact endpoint to retrieve JWK public key.
 // Convert the JWT to PEM and finally PEM to OpenSSL vkey.
-func Token2vkey(token string, tokentype int) *C.EVP_PKEY {
+// 
+// Oauth issuer field: 0 - iss (OAuth token); 1 - dpa (DA-SVID token);
+// 
+func Token2vkey(token string, issfield int) *C.EVP_PKEY {
+	defer timeTrack(time.Now(), "Token2vkey")
 
 	var vkey *C.EVP_PKEY
     var filepem *C.FILE
 
-	// extract token issuer and generate path to /keys endpoint
+	// extract OAuth token issuer (i.e. issuer in OAuth, dpa in DA-SVID) and generate path to /keys endpoint
     tokenclaims := ParseTokenClaims(token)
 
 	var issuer string
-	if tokentype == 0 {
+	if issfield == 0 {
 		issuer = fmt.Sprintf("%v", tokenclaims["iss"])
-	} else if tokentype ==1 {
+	} else if issfield ==1 {
 		issuer = fmt.Sprintf("%v", tokenclaims["dpa"])
 	} else {
-		log.Fatal("No token type informed.")
+		log.Fatal("No issuer field informed.")
 	}
 
-    // Considering its OKTA based solution, add /keys endpoint
-	// TODO:
-	// ADD support for google tokens as done in main.go
-    keyEndPoint := issuer+"/v1/keys"
+	uri, result := ValidateISS(issuer) 
+	if result != true {
+		log.Fatal("OAuth token issuer not identified!")
+	}
 
-    // Use script to convert jwk retrieved from OKTA endpoint to 
-    // PEM file and save in ./keys/
-    cmd := exec.Command("./poclib/jwk2der.sh", keyEndPoint)
+    // Use script to convert jwk retrieved from OKTA endpoint to PEM file and save in ./keys/
+    cmd := exec.Command("./poclib/jwk2der.sh", uri)
     err := cmd.Run()
     if err != nil {
         log.Fatal(err)
     }
 
     // Open OAuth PEM file containing Public Key
-    filepem = C.fopen((C.CString)(path),(C.CString)("r")) 
+    filepem = C.fopen((C.CString)(os.Getenv("PEM_PATH")),(C.CString)("r")) 
   
     // Load key from PEM file to VKEY
     C.PEM_read_PUBKEY(filepem, &vkey, nil, nil)
 
 	return vkey
+}
+
+// Validate if OAuth token issuer is known. 
+// Supported OAuth tokens and public key endpoint:
+// OKTA:
+// https://<Oauth token issuer>+"/v1/keys"
+// 
+// Google:
+// https://www.googleapis.com/oauth2/v3/certs
+// 
+// TODO: Move supported type list to a config file, making easier to add new ones.
+func ValidateISS(issuer string) (uri string, result bool) {
+	defer timeTrack(time.Now(), "ValidateISS")
+	// TODO Add error handling
+	if  issuer == "accounts.google.com" {
+		log.Printf("Google OAuth token identified!")
+		return "https://www.googleapis.com/oauth2/v3/certs", true	
+	} else {
+		//  In this prototype we consider that if it is not a Google token its OKTA
+		log.Printf("OKTA OAuth token identified!")
+		return issuer+"/v1/keys", true	
+	}
+	return "", false
+}
+
+func ParseEnvironment(caller int) {
+
+	if _, err := os.Stat(".cfg"); os.IsNotExist(err) {
+		log.Printf("Config file (.cfg) is not present.  Relying on Global Environment Variables")
+	}
+
+	if caller == 0 {
+		// internal call from dasvid pkg
+
+		setEnvVariable("PROOF_LEN", os.Getenv("PROOF_LEN"))
+		setEnvVariable("PEM_PATH", os.Getenv("PEM_PATH"))
+
+		if os.Getenv("PROOF_LEN") == "" {
+			log.Printf("Could not resolve a PROOF_LEN environment variable.")
+			// os.Exit(1)
+		}
+	
+		if os.Getenv("PEM_PATH") == "" {
+			log.Printf("Could not resolve a PEM_PATH environment variable.")
+			// os.Exit(1)
+		}
+	}
+
+	setEnvVariable("SOCKET_PATH", os.Getenv("SOCKET_PATH"))
+	setEnvVariable("MINT_ZKP", os.Getenv("MINT_ZKP"))
+
+	if os.Getenv("SOCKET_PATH") == "" {
+		log.Printf("Could not resolve a SOCKET_PATH environment variable.")
+		// os.Exit(1)
+	}
+
+	if os.Getenv("MINT_ZKP") == "" {
+		log.Printf("Could not resolve a MINT_ZKP environment variable.")
+		// os.Exit(1)
+	}
+}
+
+func setEnvVariable(env string, current string) {
+	if current != "" {
+		return
+	}
+
+	file, _ := os.Open(".cfg")
+	defer file.Close()
+
+	lookInFile := bufio.NewScanner(file)
+	lookInFile.Split(bufio.ScanLines)
+
+	for lookInFile.Scan() {
+		parts := strings.Split(lookInFile.Text(), "=")
+		key, value := parts[0], parts[1]
+		if key == env {
+			os.Setenv(key, value)
+		}
+	}
 }

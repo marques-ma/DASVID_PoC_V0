@@ -30,7 +30,8 @@ import (
 	"context"
 	"io"
 	"time"
-	"bufio"
+	// "bufio"
+	"io/ioutil"
 
 	// SPIFFE
 	"github.com/spiffe/go-spiffe/v2/workloadapi"
@@ -62,15 +63,10 @@ type PocData struct {
 	DasvidExpValidation 		*bool `json:",omitempty"`
 	DasvidExpRemainingTime		string `json:",omitempty"`
 	DasvidSigValidation 		*bool `json:",omitempty"`
-		
 }
 
 var Data PocData
 var Filetemp FileContents
-
-const (
-	socketPath    = "unix:///tmp/spire-agent/public/api.sock"
-)
 
 func timeTrack(start time.Time, name string) {
     elapsed := time.Since(start)
@@ -78,6 +74,10 @@ func timeTrack(start time.Time, name string) {
 }
 
 func main() {
+
+	// Parse environment for asserting workload main
+	dasvid.ParseEnvironment(1)
+	
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -87,16 +87,19 @@ func main() {
 	http.HandleFunc("/introspect", IntrospectHandler)
 
 	// Create a `workloadapi.X509Source`, it will connect to Workload API using provided socket.
-	source, err := workloadapi.NewX509Source(ctx, workloadapi.WithClientOptions(workloadapi.WithAddr(socketPath)))
+	source, err := workloadapi.NewX509Source(ctx, workloadapi.WithClientOptions(workloadapi.WithAddr(os.Getenv("SOCKET_PATH"))))
 	if err != nil {
 		log.Printf("Unable to create X509Source: %v", err)
 	}
 	defer source.Close()
 
-	// Allowed SPIFFE ID - Client must be from this trust domain
+	// Allowed SPIFFE ID - In PoC, Clients must be from the same trust domain
+	// 
+	// TODO: Could be interesting to add this in config file
+	// 
 	clientID := spiffeid.RequireTrustDomainFromString("example.org")
 	
-	// Create a `tls.Config` to allow mTLS connections, and verify that presented certificate match the allowed SPIFFE-ID
+	// Create a `tls.Config` to allow mTLS connections, and verify that presented certificate match the allowed ClientID
 	tlsConfig := tlsconfig.MTLSServerConfig(source, source, tlsconfig.AuthorizeMemberOf(clientID))
 	server := &http.Server{
 		Addr:      ":8443",
@@ -111,8 +114,7 @@ func main() {
 }
 
 func KeysHandler(w http.ResponseWriter, r *http.Request) {
-	
-	defer timeTrack(time.Now(), "Keys")
+	defer timeTrack(time.Now(), "Keys endpoint")
 
 	rsaPublicKey := dasvid.RetrieveJWKSPublicKey("./keys/jwks.json")
 
@@ -121,15 +123,11 @@ func KeysHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func MintHandler(w http.ResponseWriter, r *http.Request) {
-
-	// TODO
-	//  validate if oauth token issuer is known
-
-	defer timeTrack(time.Now(), "Mint")
+	defer timeTrack(time.Now(), "Mint endpoint")
 
 	sigresult := new(bool)
 	expresult := new(bool)
-	var remainingtime  string
+	var remainingtime, zkp string
 
 	certs := r.TLS.PeerCertificates
 
@@ -140,8 +138,13 @@ func MintHandler(w http.ResponseWriter, r *http.Request) {
 	log.Printf("Client SPIFFE-ID: %v", clientspiffeid)
 
 	oauthtoken := r.FormValue("AccessToken")
-
 	tokenclaims := dasvid.ParseTokenClaims(oauthtoken)
+	issuer := fmt.Sprintf("%v", tokenclaims["iss"])
+	uri, result := dasvid.ValidateISS(issuer)
+	if result != true {
+		log.Fatal("OAuth token issuer not identified!")
+	}
+
 	*expresult, remainingtime = dasvid.ValidateTokenExp(tokenclaims)
 
 	if *expresult == false {
@@ -158,26 +161,8 @@ func MintHandler(w http.ResponseWriter, r *http.Request) {
 
 		// Retrieve Public Key from JWKS endpoint
 		// 
-		// OKTA pattern endpoint:
-		// https://<Oauth token issuer>+"/v1/keys"
-		// 
-		// Google endpoint:
-		// https://www.googleapis.com/oauth2/v3/certs
-
 		log.Println("OAuth Issuer: ", tokenclaims["iss"])
-		issuer := fmt.Sprintf("%v", tokenclaims["iss"])
-		var uri string
 
-		// TODO Add error handling
-		if  issuer == "accounts.google.com" {
-			log.Printf("Google OAuth token identified!")
-			uri = "https://www.googleapis.com/oauth2/v3/certs"	
-		} else {
-			//  In this prototype we consider that if it is not a Google token its OKTA
-			log.Printf("OKTA OAuth token identified!")
-			uri = issuer+"/v1/keys"	
-		}
-		
 		// Retrieve and save OAuth JWKS public key in cache file
 		resp, err := http.Get(uri)
 		defer resp.Body.Close()
@@ -193,7 +178,6 @@ func MintHandler(w http.ResponseWriter, r *http.Request) {
 
 		// Read key from cache file
 		pubkey := dasvid.RetrieveJWKSPublicKey("./data/oauthjwkskey.cache")
-		// fmt.Println("Pubkey in main", pubkey.Keys[0])
 
 		// Verify token signature using extracted Public key
 		// //////////////////////////////////
@@ -216,9 +200,6 @@ func MintHandler(w http.ResponseWriter, r *http.Request) {
 		} else {
 
 			*sigresult = true
-			
-			// parts := strings.Split(oauthtoken, ".")
-			// oauthmsg := strings.Join(parts[0:2], ".")
 
 			// Fetch Asserting workload SVID to use as DASVID issuer
 			assertingwl := dasvid.FetchX509SVID()
@@ -233,24 +214,54 @@ func MintHandler(w http.ResponseWriter, r *http.Request) {
 			// - verifyhexproof(json proof, msg, vkey) 
 			// 
 
-			// zkp := dasvid.GenZKPproof(oauthtoken)
-			// if zkp == "" {
-			// 	log.Println("Error generating ZKP proof")
-			// }
-			// fmt.Println("Proof sucessfully created")
-			// fmt.Println("proof message: ", zkp)
-
-			// Generate DASVID claims
-			iss := assertingwl.ID.String()
-			sub := clientspiffeid.String()
-			dpa := fmt.Sprintf("%v", issuer)
-			dpr := fmt.Sprintf("%v", tokenclaims["sub"])
-
 			// Load private key from pem file used to sign DASVID
 			awprivatekey := dasvid.RetrievePrivateKey("./keys/key.pem")
 
-			// Generate DASVID
-			token := dasvid.Mintdasvid(iss, sub, dpa, dpr, awprivatekey)
+			var token string
+			
+			if os.Getenv("MINT_ZKP") == "true" {
+
+				parts := strings.Split(oauthtoken, ".")
+				message := []byte(strings.Join(parts[0:2], "."))
+
+				// Generate DASVID claims
+				iss := assertingwl.ID.String()
+				sub := clientspiffeid.String()
+				dpa := fmt.Sprintf("%v", issuer)
+				dpr := fmt.Sprintf("%v", tokenclaims["sub"])
+				oam := message
+				zkp = dasvid.GenZKPproof(oauthtoken)
+				if zkp == "" {
+					log.Println("Error generating ZKP proof")
+				}
+
+				// Generate DASVID
+				token = dasvid.Mintdasvid(iss, sub, dpa, dpr, oam, zkp, awprivatekey)
+
+				// Data to be write in cache file
+				Filetemp = FileContents{
+					OauthToken:					oauthtoken,
+					DASVIDToken:	 			token,
+					ZKP:						zkp,						
+				}
+				
+			} else {
+				
+				// Generate DASVID claims
+				iss := assertingwl.ID.String()
+				sub := clientspiffeid.String()
+				dpa := fmt.Sprintf("%v", issuer)
+				dpr := fmt.Sprintf("%v", tokenclaims["sub"])
+
+				// Generate DASVID
+				token = dasvid.Mintdasvid(iss, sub, dpa, dpr, nil, "", awprivatekey)
+
+				// Data to be write in cache file
+				Filetemp = FileContents{
+					OauthToken:					oauthtoken,
+					DASVIDToken:	 			token,
+				}
+			}
 
 			// Data to be returned in API 
 			Data = PocData{
@@ -260,21 +271,14 @@ func MintHandler(w http.ResponseWriter, r *http.Request) {
 				DASVIDToken:	 			token,
 			}
 
-			// Data to be write in cache file
-			Filetemp = FileContents{
-				OauthToken:					oauthtoken,
-				DASVIDToken:	 			token,
-				// ZKP:						zkp,
-			}
-			
 			// If the file doesn't exist, create it, or append to the file
-			f, err := os.OpenFile("./data/dasvid.data", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+			file, err := os.OpenFile("./data/dasvid.data", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 			if err != nil {
 				log.Fatal(err)
 			}
 			log.Printf("Writing to file...")
-			json.NewEncoder(f).Encode(Filetemp)
-			if err := f.Close(); err != nil {
+			json.NewEncoder(file).Encode(Filetemp)
+			if err := file.Close(); err != nil {
 				log.Fatal(err)
 			}
 
@@ -284,7 +288,6 @@ func MintHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func ValidateDasvidHandler(w http.ResponseWriter, r *http.Request) {
-
 	defer timeTrack(time.Now(), "Validate")
 	
 	dasvidexpresult := new(bool)
@@ -321,55 +324,78 @@ func ValidateDasvidHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func IntrospectHandler(w http.ResponseWriter, r *http.Request) {
+	defer timeTrack(time.Now(), "Introspect endpoint")
 
-	defer timeTrack(time.Now(), "Introspect")
+	var zkp string
 	
 	// Retrieve claims and validate token exp before signature validation
 	datoken := r.FormValue("DASVID")
 
-	// Open dasvid cache file
-	datafile, err := os.Open("./data/dasvid.data") 
+	// // Open dasvid cache file
+	datafile, err := ioutil.ReadFile("./data/dasvid.data")
 	if err != nil {
-		log.Fatal(err)
+			log.Fatalln(err)
 	}
-	defer datafile.Close()
 
-	// Iterate over lines looking for DASVID token
-	scanner := bufio.NewScanner(datafile)
+	// // Iterate over lines looking for DASVID token
+	lines := strings.Split(string(datafile), "\n")
 
-	for scanner.Scan() {
+	for i := range lines {
 
-		json.Unmarshal([]byte(scanner.Text()), &Filetemp)
+		json.Unmarshal([]byte(lines[i]), &Filetemp)
 		if err != nil {
 			log.Printf("error:", err)
 		}
 
-		
 		if Filetemp.DASVIDToken == datoken {
-
-			log.Println("DASVID ZKP identified!", Filetemp.ZKP )
-			// tokenclaims := dasvid.ParseTokenClaims(Filetemp.OauthToken)
-			zkp := dasvid.GenZKPproof(Filetemp.OauthToken)
-			if zkp == "" {
-				log.Println("Error generating ZKP proof")
-			}
-
+			log.Println("DASVID token identified!")
+			
 			parts := strings.Split(Filetemp.OauthToken, ".")
 			message := []byte(strings.Join(parts[0:2], "."))
+			
+			if Filetemp.ZKP == "" {
+				log.Println("No ZKP identified! Generating one...")
 
-			Filetemp = FileContents{
-				Msg:			message,
-				ZKP:			zkp,
-			}
+				zkp = dasvid.GenZKPproof(Filetemp.OauthToken)
+				if zkp == "" {
+					log.Println("Error generating ZKP proof")
+				}
 
+				Filetemp = FileContents{
+					OauthToken:					Filetemp.OauthToken,
+					DASVIDToken:	 			datoken,
+					Msg:						message,
+					ZKP:						zkp,
+				}
 
+				tmpstr, _ := json.Marshal(Filetemp)
+				lines[i] = string(tmpstr)
+				output := strings.Join(lines, "\n")
+				err = ioutil.WriteFile("./data/dasvid.data", []byte(output), 0644)
+				if err != nil {
+						log.Fatalln(err)
+				}
+
+				Filetemp = FileContents{
+					Msg:						message,
+					ZKP:						zkp,
+				}
+
+			} else { 
+				log.Println("Previous ZKP identified!")
+				zkp = Filetemp.ZKP 
+
+				Filetemp = FileContents{
+					Msg:			message,
+					ZKP:			Filetemp.ZKP,
+				}
+			}			
 			json.NewEncoder(w).Encode(Filetemp)
 			return
 		}
     }
-    if scanner.Err() != nil {
-        log.Printf("Error reading ZKP data file: %v", scanner.Err())
-    }
 	json.NewEncoder(w).Encode("DASVID not found")
 }
+
+
 

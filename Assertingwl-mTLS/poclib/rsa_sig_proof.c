@@ -406,13 +406,3 @@ rsa_sig_proof_t *rsa_sig_hex2proof(int proof_len, char *hexproof) {
     cJSON_Delete(root);
     return proof;
 }
-
-char * getAllButFirstAndLast(char *input)
-{
-  int len = strlen(input); 
-  if(len > 0)
-    input++;//Go past the first char
-  if(len > 1)
-    input[len - 2] = '\0';//Replace the last char with a null termination
-  return input;
-}
