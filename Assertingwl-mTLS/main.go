@@ -1,3 +1,4 @@
+//+build linux,cgo 
 package main
 /*
 #include <string.h>
@@ -369,9 +370,7 @@ func IntrospectHandler(w http.ResponseWriter, r *http.Request) {
 				}
 
 				tmpstr, _ := json.Marshal(Filetemp)
-				lines[i] = string(tmpstr)
-				output := strings.Join(lines, "\n")
-				err = ioutil.WriteFile("./data/dasvid.data", []byte(output), 0644)
+				err = ioutil.WriteFile("./data/dasvid.data", []byte(string(tmpstr)), 0644)
 				if err != nil {
 						log.Fatalln(err)
 				}

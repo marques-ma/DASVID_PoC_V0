@@ -8,9 +8,9 @@ package main
 #include <openssl/err.h>
 #include <openssl/pem.h>
 #include <openssl/x509.h>
-#include "../Assertingwl-mTLS/poclib/rsa_sig_proof.h"
-#include "../Assertingwl-mTLS/poclib/rsa_bn_sig.h"
-#include "../Assertingwl-mTLS/poclib/rsa_sig_proof_util.h"
+#include "./poclib/rsa_sig_proof.h"
+#include "./poclib/rsa_bn_sig.h"
+#include "./poclib/rsa_sig_proof_util.h"
 
 #cgo CFLAGS: -g -Wall -m64 -I${SRCDIR}
 #cgo pkg-config: --static libssl libcrypto
