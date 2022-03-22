@@ -90,7 +90,7 @@ func main() {
 	defer source.Close()
 
 	// Allowed SPIFFE ID - Client must be from this trust domain
-	clientID := spiffeid.RequireTrustDomainFromString("example.org")
+	clientID := spiffeid.RequireTrustDomainFromString(os.Getenv("TRUST_DOMAIN"))
 	
 	// Create a `tls.Config` to allow mTLS connections, and verify that presented certificate match the allowed SPIFFE-ID
 	tlsConfig := tlsconfig.MTLSServerConfig(source, source, tlsconfig.AuthorizeMemberOf(clientID))
@@ -437,6 +437,12 @@ func ParseEnvironment() {
 		setEnvVariable("MINT_ZKP", os.Getenv("MINT_ZKP"))
 	if os.Getenv("MINT_ZKP") == "" {
 		log.Printf("Could not resolve a MINT_ZKP environment variable.")
+		// os.Exit(1)
+	}
+
+	setEnvVariable("TRUST_DOMAIN", os.Getenv("TRUST_DOMAIN"))
+	if os.Getenv("TRUST_DOMAIN") == "" {
+		log.Printf("Could not resolve a TRUST_DOMAIN environment variable.")
 		// os.Exit(1)
 	}
 }

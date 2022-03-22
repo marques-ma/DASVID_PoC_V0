@@ -96,9 +96,7 @@ func main() {
 
 	// Allowed SPIFFE ID - In PoC, Clients must be from the same trust domain
 	// 
-	// TODO: Could be interesting to add this in config file
-	// 
-	clientID := spiffeid.RequireTrustDomainFromString("example.org")
+	clientID := spiffeid.RequireTrustDomainFromString(os.Getenv("TRUST_DOMAIN"))
 	
 	// Create a `tls.Config` to allow mTLS connections, and verify that presented certificate match the allowed ClientID
 	tlsConfig := tlsconfig.MTLSServerConfig(source, source, tlsconfig.AuthorizeMemberOf(clientID))
@@ -422,6 +420,12 @@ func ParseEnvironment() {
 	setEnvVariable("SOCKET_PATH", os.Getenv("SOCKET_PATH"))
 	if os.Getenv("SOCKET_PATH") == "" {
 		log.Printf("Could not resolve a SOCKET_PATH environment variable.")
+		// os.Exit(1)
+	}
+	
+	setEnvVariable("TRUST_DOMAIN", os.Getenv("TRUST_DOMAIN"))
+	if os.Getenv("TRUST_DOMAIN") == "" {
+		log.Printf("Could not resolve a TRUST_DOMAIN environment variable.")
 		// os.Exit(1)
 	}
 }

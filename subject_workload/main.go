@@ -315,7 +315,7 @@ func Get_balanceHandler(w http.ResponseWriter, r *http.Request) {
 	defer source.Close()
 
 	// Allowed SPIFFE ID
-	serverID := spiffeid.RequireTrustDomainFromString("example.org")
+	serverID := spiffeid.RequireTrustDomainFromString(os.Getenv("TRUST_DOMAIN"))
 
 	// Create a `tls.Config` to allow mTLS connections, and verify that presented certificate match allowed SPIFFE ID rule
 	tlsConfig := tlsconfig.MTLSClientConfig(source, source, tlsconfig.AuthorizeMemberOf(serverID))
@@ -392,7 +392,7 @@ func DepositHandler(w http.ResponseWriter, r *http.Request) {
 	defer source.Close()
 
 	// Allowed SPIFFE ID
-	serverID := spiffeid.RequireTrustDomainFromString("example.org")
+	serverID := spiffeid.RequireTrustDomainFromString(os.Getenv("TRUST_DOMAIN"))
 
 	// Create a `tls.Config` to allow mTLS connections, and verify that presented certificate match allowed SPIFFE ID rule
 	tlsConfig := tlsconfig.MTLSClientConfig(source, source, tlsconfig.AuthorizeMemberOf(serverID))
@@ -584,7 +584,7 @@ func getdasvid(oauthtoken string) (string) {
 	defer source.Close()
 
 	// Allowed SPIFFE ID
-	serverID := spiffeid.RequireTrustDomainFromString("example.org")
+	serverID := spiffeid.RequireTrustDomainFromString(os.Getenv("TRUST_DOMAIN"))
 
 	// Create a `tls.Config` to allow mTLS connections, and verify that presented certificate match allowed SPIFFE ID rule
 	tlsConfig := tlsconfig.MTLSClientConfig(source, source, tlsconfig.AuthorizeMemberOf(serverID))
@@ -684,6 +684,12 @@ func ParseEnvironment() {
 	if os.Getenv("MIDDLETIERIP") == "" {
 		log.Printf("Could not resolve a MIDDLETIERIP environment variable.")
 		os.Exit(1)
+	}
+
+	setEnvVariable("TRUST_DOMAIN", os.Getenv("TRUST_DOMAIN"))
+	if os.Getenv("TRUST_DOMAIN") == "" {
+		log.Printf("Could not resolve a TRUST_DOMAIN environment variable.")
+		// os.Exit(1)
 	}
 }
 
