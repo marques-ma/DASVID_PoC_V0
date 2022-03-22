@@ -368,7 +368,9 @@ func IntrospectHandler(w http.ResponseWriter, r *http.Request) {
 				}
 
 				tmpstr, _ := json.Marshal(Filetemp)
-				err = ioutil.WriteFile("./data/dasvid.data", []byte(string(tmpstr)), 0644)
+				lines[i] = string(tmpstr)
+				datafile = []byte(strings.Join(lines, "\n"))
+				err := ioutil.WriteFile("./data/dasvid.data", datafile, 0644)					
 				if err != nil {
 						log.Fatalln(err)
 				}
