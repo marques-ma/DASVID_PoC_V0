@@ -138,12 +138,6 @@ func MintHandler(w http.ResponseWriter, r *http.Request) {
 
 	oauthtoken := r.FormValue("AccessToken")
 	tokenclaims := dasvid.ParseTokenClaims(oauthtoken)
-	issuer := fmt.Sprintf("%v", tokenclaims["iss"])
-	uri, result := dasvid.ValidateISS(issuer)
-	if result != true {
-		log.Fatal("OAuth token issuer not identified!")
-	}
-
 	*expresult, remainingtime = dasvid.ValidateTokenExp(tokenclaims)
 
 	if *expresult == false {
@@ -160,7 +154,12 @@ func MintHandler(w http.ResponseWriter, r *http.Request) {
 
 		// Retrieve Public Key from JWKS endpoint
 		// 
-		log.Println("OAuth Issuer: ", tokenclaims["iss"])
+		issuer := fmt.Sprintf("%v", tokenclaims["iss"])
+		log.Println("OAuth Issuer: ", issuer)
+		uri, result := dasvid.ValidateISS(issuer)
+		if result != true {
+			log.Fatal("OAuth token issuer not identified!")
+		}
 
 		// Retrieve and save OAuth JWKS public key in cache file
 		resp, err := http.Get(uri)
@@ -179,110 +178,116 @@ func MintHandler(w http.ResponseWriter, r *http.Request) {
 		pubkey := dasvid.RetrieveJWKSPublicKey("./data/oauthjwkskey.cache")
 
 		// Verify token signature using extracted Public key
-		// //////////////////////////////////
-		// TODO: create loop to test all keys in file
-		//////////////////////////////////////
-		err = dasvid.VerifySignature(oauthtoken, pubkey.Keys[0])
-		if err != nil {
+		for i :=0; i<len(pubkey.Keys); i++ {
 
-			log.Printf("Error verifying OAuth signature: %v", err)
-			*sigresult = false
+			err := dasvid.VerifySignature(oauthtoken, pubkey.Keys[i])
+			if err == nil {
+				log.Printf("Success verifying DA-SVID signature!")
+				break
+			} 
 
-			Data = PocData{
-				OauthExpValidation:		expresult,
-				OauthExpRemainingTime:  remainingtime,
-				OauthSigValidation:		sigresult,
+			if i == len(pubkey.Keys)-1 {
+				log.Printf("Error verifying OAuth signature: %v", err)
+				*sigresult = false
+	
+				Data = PocData{
+					OauthExpValidation:		expresult,
+					OauthExpRemainingTime:  remainingtime,
+					OauthSigValidation:		sigresult,
+				}
+			
+				json.NewEncoder(w).Encode(Data)
+				return
+			}
+		}
+			
+		*sigresult = true
+
+		// Fetch Asserting workload SVID to use as DASVID issuer
+		assertingwl := dasvid.FetchX509SVID()
+
+		// ZKP
+		// format: received proof = json containing proof P and C arrays
+		// 
+		// validation: 
+		// - generate vkey with token2vkey or other and extract bigN and bigE 
+		// - verifyhexproof(json proof, msg, vkey) 
+
+		// Load private key from pem file used to sign DASVID
+		awprivatekey := dasvid.RetrievePrivateKey("./keys/key.pem")
+
+		var token string
+		
+		if os.Getenv("MINT_ZKP") == "true" {
+			log.Printf("Generating ZKP...")
+
+			parts := strings.Split(oauthtoken, ".")
+			message := []byte(strings.Join(parts[0:2], "."))
+
+			// Generate DASVID claims
+			iss := assertingwl.ID.String()
+			sub := clientspiffeid.String()
+			dpa := fmt.Sprintf("%v", issuer)
+			dpr := fmt.Sprintf("%v", tokenclaims["sub"])
+			oam := message
+			zkp = dasvid.GenZKPproof(oauthtoken)
+			if zkp == "" {
+				log.Println("Error generating ZKP proof")
 			}
 
-			json.NewEncoder(w).Encode(Data)
-			
-		} else {
-
-			*sigresult = true
-
-			// Fetch Asserting workload SVID to use as DASVID issuer
-			assertingwl := dasvid.FetchX509SVID()
-
-			// Gen ZKP
-			// 
-			// About format:
-			// received proof = json containing proof P and C arrays
-			// 
-			// validation: 
-			// - gen vkey and extract bigN and bigE 
-			// - verifyhexproof(json proof, msg, vkey) 
-			// 
-
-			// Load private key from pem file used to sign DASVID
-			awprivatekey := dasvid.RetrievePrivateKey("./keys/key.pem")
-
-			var token string
-			
-			if os.Getenv("MINT_ZKP") == "true" {
-
-				parts := strings.Split(oauthtoken, ".")
-				message := []byte(strings.Join(parts[0:2], "."))
-
-				// Generate DASVID claims
-				iss := assertingwl.ID.String()
-				sub := clientspiffeid.String()
-				dpa := fmt.Sprintf("%v", issuer)
-				dpr := fmt.Sprintf("%v", tokenclaims["sub"])
-				oam := message
-				zkp = dasvid.GenZKPproof(oauthtoken)
-				if zkp == "" {
-					log.Println("Error generating ZKP proof")
-				}
-
+			if os.Getenv("ADD_ZKP") == "true" {
+				log.Printf("Adding ZKP into DASVID...")
 				// Generate DASVID
 				token = dasvid.Mintdasvid(iss, sub, dpa, dpr, oam, zkp, awprivatekey)
-
-				// Data to be write in cache file
-				Filetemp = FileContents{
-					OauthToken:					oauthtoken,
-					DASVIDToken:	 			token,
-					ZKP:						zkp,						
-				}
-				
 			} else {
-				
-				// Generate DASVID claims
-				iss := assertingwl.ID.String()
-				sub := clientspiffeid.String()
-				dpa := fmt.Sprintf("%v", issuer)
-				dpr := fmt.Sprintf("%v", tokenclaims["sub"])
-
-				// Generate DASVID
 				token = dasvid.Mintdasvid(iss, sub, dpa, dpr, nil, "", awprivatekey)
-
-				// Data to be write in cache file
-				Filetemp = FileContents{
-					OauthToken:					oauthtoken,
-					DASVIDToken:	 			token,
-				}
 			}
 
-			// Data to be returned in API 
-			Data = PocData{
-				OauthSigValidation: 		sigresult,
-				OauthExpValidation:			expresult,
-				OauthExpRemainingTime:  	remainingtime,
+			// Data to be write in cache file
+			Filetemp = FileContents{
+				OauthToken:					oauthtoken,
+				DASVIDToken:	 			token,
+				ZKP:						zkp,						
+			}
+			
+		} else {
+			
+			// Generate DASVID claims
+			iss := assertingwl.ID.String()
+			sub := clientspiffeid.String()
+			dpa := fmt.Sprintf("%v", issuer)
+			dpr := fmt.Sprintf("%v", tokenclaims["sub"])
+
+			// Generate DASVID
+			token = dasvid.Mintdasvid(iss, sub, dpa, dpr, nil, "", awprivatekey)
+
+			// Data to be write in cache file
+			Filetemp = FileContents{
+				OauthToken:					oauthtoken,
 				DASVIDToken:	 			token,
 			}
-
-			// If the file doesn't exist, create it, or append to the file
-			file, err := os.OpenFile("./data/dasvid.data", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-			if err != nil {
-				log.Fatal(err)
-			}
-			log.Printf("Writing to file...")
-			json.NewEncoder(file).Encode(Filetemp)
-			if err := file.Close(); err != nil {
-				log.Fatal(err)
-			}
-
-			json.NewEncoder(w).Encode(Data)
 		}
+
+		// Data to be returned in API 
+		Data = PocData{
+			OauthSigValidation: 		sigresult,
+			OauthExpValidation:			expresult,
+			OauthExpRemainingTime:  	remainingtime,
+			DASVIDToken:	 			token,
+		}
+
+		// If the file doesn't exist, create it, or append to the file
+		file, err := os.OpenFile("./data/dasvid.data", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+		if err != nil {
+			log.Fatal(err)
+		}
+		log.Printf("Writing to file...")
+		json.NewEncoder(file).Encode(Filetemp)
+		if err := file.Close(); err != nil {
+			log.Fatal(err)
+		}
+
+		json.NewEncoder(w).Encode(Data)
 	}
 }
 
@@ -304,6 +309,33 @@ func ValidateDasvidHandler(w http.ResponseWriter, r *http.Request) {
 	// OR pubkey := dasvid.RetrievePublicKey("/keys/public.pem")
 
 	// Verify token signature using extracted Public key
+	for i :=0; i<len(pubkey.Keys); i++ {
+		err := dasvid.VerifySignature(datoken, pubkey.Keys[i])
+		if err == nil {
+			log.Printf("Success verifying DA-SVID signature!")
+			*dasvidsigresult = true
+			Data = PocData{
+				DasvidExpValidation: 	dasvidexpresult,
+				DasvidExpRemainingTime: remainingtime,
+				DasvidSigValidation:	dasvidsigresult,
+				DASVIDClaims:			dasvidclaims,
+			}
+		
+			json.NewEncoder(w).Encode(Data)
+			return
+		} 
+		
+		log.Printf("Error verifying DA-SVID signature!")
+		*dasvidsigresult = false
+		Data = PocData{
+			DasvidExpValidation: 	dasvidexpresult,
+			DasvidExpRemainingTime: remainingtime,
+			DasvidSigValidation:	dasvidsigresult,
+			DASVIDClaims:			dasvidclaims,
+		}
+		json.NewEncoder(w).Encode(Data)
+	}
+
 	err := dasvid.VerifySignature(datoken, pubkey.Keys[0])
 	if err != nil {
 		log.Printf("Error verifying DA-SVID signature: %v", err)
@@ -333,7 +365,7 @@ func IntrospectHandler(w http.ResponseWriter, r *http.Request) {
 	// // Open dasvid cache file
 	datafile, err := ioutil.ReadFile("./data/dasvid.data")
 	if err != nil {
-			log.Fatalln(err)
+		log.Fatalln(err)
 	}
 
 	// // Iterate over lines looking for DASVID token
@@ -376,8 +408,8 @@ func IntrospectHandler(w http.ResponseWriter, r *http.Request) {
 				}
 
 				Filetemp = FileContents{
-					Msg:						message,
-					ZKP:						zkp,
+					Msg:	message,
+					ZKP:	zkp,
 				}
 
 			} else { 
@@ -385,8 +417,8 @@ func IntrospectHandler(w http.ResponseWriter, r *http.Request) {
 				zkp = Filetemp.ZKP 
 
 				Filetemp = FileContents{
-					Msg:			message,
-					ZKP:			Filetemp.ZKP,
+					Msg:	message,
+					ZKP:	Filetemp.ZKP,
 				}
 			}			
 			json.NewEncoder(w).Encode(Filetemp)
@@ -428,6 +460,12 @@ func ParseEnvironment() {
 	setEnvVariable("TRUST_DOMAIN", os.Getenv("TRUST_DOMAIN"))
 	if os.Getenv("TRUST_DOMAIN") == "" {
 		log.Printf("Could not resolve a TRUST_DOMAIN environment variable.")
+		// os.Exit(1)
+	}
+
+	setEnvVariable("ADD_ZKP", os.Getenv("ADD_ZKP"))
+	if os.Getenv("ADD_ZKP") == "" {
+		log.Printf("Could not resolve a ADD_ZKP environment variable.")
 		// os.Exit(1)
 	}
 }

@@ -29,6 +29,8 @@ import (
 	"log"
 	"unsafe"
 	"strconv"
+	"regexp"
+	"errors"
 		
 	// To sig. validation 
 	"crypto"
@@ -95,6 +97,12 @@ type JWK struct {
 	X5t string
 }
 
+type algtype struct {
+	Kid string
+	alg	string
+	typ string
+}
+
 func timeTrack(start time.Time, name string) {
     elapsed := time.Since(start)
     log.Printf("%s execution time is %s", name, elapsed)
@@ -109,25 +117,38 @@ func VerifySignature(jwtToken string, key JWK) error {
 	if err != nil {
 		return err
 	}
-	n, _ := base64.RawURLEncoding.DecodeString(key.N)
-	e, _ := base64.RawURLEncoding.DecodeString(key.E)
-	z := new(big.Int)
-	z.SetBytes(n)
-	//decoding key.E returns a three byte slice, https://golang.org/pkg/encoding/binary/#Read and other conversions fail
-	//since they are expecting to read as many bytes as the size of int being returned (4 bytes for uint32 for example)
-	var buffer bytes.Buffer
-	buffer.WriteByte(0)
-	buffer.Write(e)
-	exponent := binary.BigEndian.Uint32(buffer.Bytes())
-	publicKey := &rsa.PublicKey{N: z, E: int(exponent)}
 
-	// Only small messages can be signed directly; thus the hash of a
-	// message, rather than the message itself, is signed.
-	hasher := crypto.SHA256.New()
-	hasher.Write(message)
+	decodedheader, _ := base64.RawURLEncoding.DecodeString(parts[0])
+	jsonheader := string(decodedheader)   
+	algtype := extractValue(jsonheader, "alg")
 
-	err = rsa.VerifyPKCS1v15(publicKey, crypto.SHA256, hasher.Sum(nil), signature)
-	return err
+	if (algtype == "RS256") && (key.Kty == "RSA") {
+
+		log.Printf("Success! Key type %s is supported!", algtype)
+		n, _ := base64.RawURLEncoding.DecodeString(key.N)
+		e, _ := base64.RawURLEncoding.DecodeString(key.E)
+		z := new(big.Int)
+		z.SetBytes(n)
+		//decoding key.E returns a three byte slice, https://golang.org/pkg/encoding/binary/#Read and other conversions fail
+		//since they are expecting to read as many bytes as the size of int being returned (4 bytes for uint32 for example)
+		var buffer bytes.Buffer
+		buffer.WriteByte(0)
+		buffer.Write(e)
+		exponent := binary.BigEndian.Uint32(buffer.Bytes())
+		publicKey := &rsa.PublicKey{N: z, E: int(exponent)}
+	
+		// Only small messages can be signed directly; thus the hash of a
+		// message, rather than the message itself, is signed.
+		hasher := crypto.SHA256.New()
+		hasher.Write(message)
+	
+		err = rsa.VerifyPKCS1v15(publicKey, crypto.SHA256, hasher.Sum(nil), signature)
+		return err		
+
+	} else {
+		log.Printf("Error in signature verification: Algorithm %s not supported!", algtype)
+		return errors.New("Algorithm not supported!")
+	}
 }
 
 func Mintdasvid(iss string, sub string, dpa string, dpr string, oam []byte, zkp string, key interface{}) string{
@@ -147,11 +168,10 @@ func Mintdasvid(iss string, sub string, dpa string, dpr string, oam []byte, zkp 
 	dlpa := flag.String("dpa", dpa, "delegated authority (dpa) = ")
 	dlpr := flag.String("dpr", dpr, "delegated principal (dpr) = The Principal")
 
-	 
 	// Build Token
 	var token *mint.Token
 
-	if (oam != nil && zkp != "") {
+	if (oam != nil) && (zkp != "") {
 		oam  := flag.String("oam", string(oam), "Oauth token without signature part")
 		proof := flag.String("zkp", zkp, "OAuth Zero-Knowledge-Proof")
 
@@ -193,7 +213,7 @@ func Mintdasvid(iss string, sub string, dpa string, dpr string, oam []byte, zkp 
 }
 
 func ParseTokenClaims(strAT string) map[string]interface{} {
-	defer timeTrack(time.Now(), "Parse token claims")
+	// defer timeTrack(time.Now(), "Parse token claims")
 
 		// Parse access token without validating signature
 		token, _, err := new(mint.Parser).ParseUnverified(strAT, mint.MapClaims{})
@@ -207,7 +227,7 @@ func ParseTokenClaims(strAT string) map[string]interface{} {
 }
 
 func ValidateTokenExp(claims map[string]interface{}) (expresult bool, remainingtime string) {
-	defer timeTrack(time.Now(), "Validate token exp")
+	// defer timeTrack(time.Now(), "Validate token exp")
 
 	tm := time.Unix(int64(claims["exp"].(float64)), 0)
 	remaining := tm.Sub(time.Now())
@@ -220,148 +240,6 @@ func ValidateTokenExp(claims map[string]interface{}) (expresult bool, remainingt
 
 	return expresult, remaining.String()
 
-}
-
-func RetrievePrivateKey(path string) interface{} {
-	defer timeTrack(time.Now(), "RetrievePrivateKey")
-	// Open file containing private Key
-	privateKeyFile, err := os.Open(path)
-	if err != nil {
-		log.Printf("Error opening private key file: %v", err)
-	}
-
-	pemfileinfo, _ := privateKeyFile.Stat()
-	var size int64 = pemfileinfo.Size()
-	pembytes := make([]byte, size)
-	buffer := bufio.NewReader(privateKeyFile)
-	_, err = buffer.Read(pembytes)
-	pemdata, _ := pem.Decode([]byte(pembytes))
-	privateKeyFile.Close()
-
-	// Extract Private Key 
-	// updated to use RSA since key used will not be fetched from SPIRE
-	privateKeyImported, err := x509.ParsePKCS1PrivateKey(pemdata.Bytes)
-	if err != nil {
-		log.Printf("Error parsing private key: %v", err)
-	}
-	return privateKeyImported
-}
-
-func RetrievePEMPublicKey(path string) interface{} {
-	defer timeTrack(time.Now(), "RetrievePEMPublicKey")
-	// Open file containing public Key
-	publicKeyFile, err := os.Open(path)
-	if err != nil {
-		log.Fatalf("Error opening public key file: %v", err)
-	}
-
-	pemfileinfo, _ := publicKeyFile.Stat()
-	var size int64 = pemfileinfo.Size()
-	pembytes := make([]byte, size)
-	buffer := bufio.NewReader(publicKeyFile)
-	_, err = buffer.Read(pembytes)
-
-	block, _ := pem.Decode(pembytes)
-	if block == nil {
-		log.Printf("No PEM key found: %v", err)
-		// os.Exit(1)
-	}
-
-	var publicKey interface{}
-	switch block.Type {
-	case "PUBLIC KEY":
-		publicKey, err = x509.ParsePKIXPublicKey(block.Bytes)
-		if err != nil {
-			log.Printf("error", err)
-		}
-		
-	default:
-		log.Printf("Unsupported key type %q", block.Type)
-	}
-
-	// Return raw public key (N and E) (PEM)
-	return publicKey
-
-}
-
-func RetrieveDERPublicKey(path string) []byte {
-	defer timeTrack(time.Now(), "RetrieveDERPublicKey")
-
-	// Open file containing public Key
-	publicKeyFile, err := os.Open(path)
-	if err != nil {
-		log.Printf("Error opening public key file: %v", err)
-	}
-
-	pemfileinfo, _ := publicKeyFile.Stat()
-	var size int64 = pemfileinfo.Size()
-	pembytes := make([]byte, size)
-	buffer := bufio.NewReader(publicKeyFile)
-	_, err = buffer.Read(pembytes)
-
-	block, _ := pem.Decode(pembytes)
-	if block == nil {
-		log.Printf("No key found: %v", err)
-	}
-
-	var publicKey interface{}
-	switch block.Type {
-	case "PUBLIC KEY":
-		publicKey, err = x509.ParsePKIXPublicKey(block.Bytes)
-		if err != nil {
-			log.Printf("error", err)
-		}
-		
-	default:
-		log.Printf("Unsupported key type %q", block.Type)
-	}
-
-	// Return DER
-	marshpubic, _ := x509.MarshalPKIXPublicKey(publicKey)
-    // log.Printf("Success returning DER: ", marshpubic)
-	return marshpubic 
-}
-
-func RetrieveJWKSPublicKey(path string) JWKS {
-	defer timeTrack(time.Now(), "RetrieveJWKSPublicKey")
-	// Open file containing the keys obtained from /keys endpoint
-	// NOTE: A cache file could be useful
-	jwksFile, err := os.Open(path)
-	if err != nil {
-		log.Printf("Error reading jwks file: %v", err)
-	}
-
-	// Decode file and retrieve Public key from Okta application
-	dec := json.NewDecoder(jwksFile)
-	var jwks JWKS
-	
-	if err := dec.Decode(&jwks); err != nil {
-		log.Printf("Unable to read key: %s", err)
-	}
-
-	return jwks
-}
-
-func FetchX509SVID() *x509svid.SVID {
-
-	defer timeTrack(time.Now(), "Fetchx509svid")
-
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	
-	// Create a `workloadapi.X509Source`, it will connect to Workload API using provided socket.
-	source, err := workloadapi.NewX509Source(ctx, workloadapi.WithClientOptions(workloadapi.WithAddr(os.Getenv("SOCKET_PATH"))))
-	if err != nil {
-		log.Printf("Unable to create X509Source: %v", err)
-	}
-	defer source.Close()
-
-	svid, err := source.GetX509SVID()
-	if err != nil {
-		log.Printf("Unable to fetch SVID: %v", err)
-	}
-
-	return svid
 }
 
 func GenZKPproof(OAuthToken string) string {
@@ -488,7 +366,7 @@ func VerifyHexProof(hexproof string, msg []byte, reckey *C.EVP_PKEY) bool {
 // Oauth issuer field: 0 - iss (OAuth token); 1 - dpa (DA-SVID token);
 // 
 func Token2vkey(token string, issfield int) *C.EVP_PKEY {
-	defer timeTrack(time.Now(), "Token2vkey")
+	// defer timeTrack(time.Now(), "Token2vkey")
 
 	var vkey *C.EVP_PKEY
     var filepem *C.FILE
@@ -536,7 +414,7 @@ func Token2vkey(token string, issfield int) *C.EVP_PKEY {
 // 
 // TODO: Move supported type list to a config file, making easier to add new ones.
 func ValidateISS(issuer string) (uri string, result bool) {
-	defer timeTrack(time.Now(), "ValidateISS")
+	// defer timeTrack(time.Now(), "ValidateISS")
 	// TODO Add error handling
 	if  issuer == "accounts.google.com" {
 		log.Printf("Google OAuth token identified!")
@@ -547,4 +425,157 @@ func ValidateISS(issuer string) (uri string, result bool) {
 		return issuer+"/v1/keys", true	
 	}
 	return "", false
+}
+
+func RetrievePrivateKey(path string) interface{} {
+	// defer timeTrack(time.Now(), "RetrievePrivateKey")
+	// Open file containing private Key
+	privateKeyFile, err := os.Open(path)
+	if err != nil {
+		log.Fatalf("Error opening private key file: %v", err)
+	}
+
+	pemfileinfo, _ := privateKeyFile.Stat()
+	var size int64 = pemfileinfo.Size()
+	pembytes := make([]byte, size)
+	buffer := bufio.NewReader(privateKeyFile)
+	_, err = buffer.Read(pembytes)
+	pemdata, _ := pem.Decode([]byte(pembytes))
+	privateKeyFile.Close()
+
+	// Extract Private Key 
+	// updated to use RSA since key used will not be fetched from SPIRE
+	privateKeyImported, err := x509.ParsePKCS1PrivateKey(pemdata.Bytes)
+	if err != nil {
+		log.Fatalf("Error parsing private key: %v", err)
+	}
+	return privateKeyImported
+}
+
+func RetrievePEMPublicKey(path string) interface{} {
+	// defer timeTrack(time.Now(), "RetrievePEMPublicKey")
+	// Open file containing public Key
+	publicKeyFile, err := os.Open(path)
+	if err != nil {
+		log.Fatalf("Error opening public key file: %v", err)
+	}
+
+	pemfileinfo, _ := publicKeyFile.Stat()
+	var size int64 = pemfileinfo.Size()
+	pembytes := make([]byte, size)
+	buffer := bufio.NewReader(publicKeyFile)
+	_, err = buffer.Read(pembytes)
+
+	block, _ := pem.Decode(pembytes)
+	if block == nil {
+		log.Fatalf("No PEM key found: %v", err)
+		// os.Exit(1)
+	}
+
+	var publicKey interface{}
+	switch block.Type {
+	case "PUBLIC KEY":
+		publicKey, err = x509.ParsePKIXPublicKey(block.Bytes)
+		if err != nil {
+			log.Fatalf("error", err)
+		}
+		
+	default:
+		log.Fatalf("Unsupported key type %q", block.Type)
+	}
+
+	// Return raw public key (N and E) (PEM)
+	return publicKey
+
+}
+
+func RetrieveDERPublicKey(path string) []byte {
+	// defer timeTrack(time.Now(), "RetrieveDERPublicKey")
+
+	// Open file containing public Key
+	publicKeyFile, err := os.Open(path)
+	if err != nil {
+		log.Fatalf("Error opening public key file: %v", err)
+	}
+
+	pemfileinfo, _ := publicKeyFile.Stat()
+	var size int64 = pemfileinfo.Size()
+	pembytes := make([]byte, size)
+	buffer := bufio.NewReader(publicKeyFile)
+	_, err = buffer.Read(pembytes)
+
+	block, _ := pem.Decode(pembytes)
+	if block == nil {
+		log.Fatalf("No key found: %v", err)
+	}
+
+	var publicKey interface{}
+	switch block.Type {
+	case "PUBLIC KEY":
+		publicKey, err = x509.ParsePKIXPublicKey(block.Bytes)
+		if err != nil {
+			log.Fatalf("error", err)
+		}
+		
+	default:
+		log.Fatalf("Unsupported key type %q", block.Type)
+	}
+
+	// Return DER
+	marshpubic, _ := x509.MarshalPKIXPublicKey(publicKey)
+    // log.Printf("Success returning DER: ", marshpubic)
+	return marshpubic 
+}
+
+func RetrieveJWKSPublicKey(path string) JWKS {
+	// defer timeTrack(time.Now(), "RetrieveJWKSPublicKey")
+	// Open file containing the keys obtained from /keys endpoint
+	// NOTE: A cache file could be useful
+	jwksFile, err := os.Open(path)
+	if err != nil {
+		log.Fatalf("Error reading jwks file: %v", err)
+	}
+
+	// Decode file and retrieve Public key from Okta application
+	dec := json.NewDecoder(jwksFile)
+	var jwks JWKS
+	
+	if err := dec.Decode(&jwks); err != nil {
+		log.Fatalf("Unable to read key: %s", err)
+	}
+
+	return jwks
+}
+
+func FetchX509SVID() *x509svid.SVID {
+	// defer timeTrack(time.Now(), "Fetchx509svid")
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	
+	// Create a `workloadapi.X509Source`, it will connect to Workload API using provided socket.
+	source, err := workloadapi.NewX509Source(ctx, workloadapi.WithClientOptions(workloadapi.WithAddr(os.Getenv("SOCKET_PATH"))))
+	if err != nil {
+		log.Fatalf("Unable to create X509Source: %v", err)
+	}
+	defer source.Close()
+
+	svid, err := source.GetX509SVID()
+	if err != nil {
+		log.Fatalf("Unable to fetch SVID: %v", err)
+	}
+
+	return svid
+}
+
+// extracts the value for a key from a JSON-formatted string
+// body - the JSON-response as a string. Usually retrieved via the request body
+// key - the key for which the value should be extracted
+// returns - the value for the given key
+func extractValue(body string, key string) string {
+    keystr := "\"" + key + "\":[^,;\\]}]*"
+    r, _ := regexp.Compile(keystr)
+    match := r.FindString(body)
+    keyValMatch := strings.Split(match, ":")
+    return strings.ReplaceAll(keyValMatch[1], "\"", "")
 }

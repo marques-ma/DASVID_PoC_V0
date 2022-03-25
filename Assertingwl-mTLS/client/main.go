@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"os"
 
-
 	"github.com/spiffe/go-spiffe/v2/spiffeid"
 	"github.com/spiffe/go-spiffe/v2/spiffetls/tlsconfig"
 	"github.com/spiffe/go-spiffe/v2/workloadapi"
@@ -17,7 +16,8 @@ import (
 
 const (
 	// Workload API socket path
-	socketPath    = "unix:///tmp/spire-agent/public/api.sock"
+	socketPath    	= "unix:///tmp/spire-agent/public/api.sock"
+	serverURL		= "192.168.0.5:8443"
 )
 
 func GetOutboundIP() net.IP {
@@ -34,26 +34,34 @@ func GetOutboundIP() net.IP {
 
 func main() {
 
-// Usage: ./client <operation> <parameter>
+// Usage: ./client <ip:port> <operation> <parameter>
+
+// Need to create an SPIFFE Entry ID with a selector associated
+// Selector example: unix:user:<your user id>
 // 
 // Supported Operations: mint, keys, validate
 // Parameters: mint requires Oauth Token. Validate requires DASVID to be validated.
 
 // example:
+// ./client 192.168.0.5:8443 keys
 // ./client mint <OAUTH TOKEN>
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
 	var endpoint string
-	
-	// Retrieve local IP
-	// In this PoC example, client and server are running in the same host, so serverIP = clientIP 
-	Iplocal := GetOutboundIP()
-	StrIPlocal := fmt.Sprintf("%v", Iplocal)
-	serverURL := StrIPlocal + ":8443"
+	if len(os.Args) < 3 {
+		fmt.Println("Invalid number of arguments. Need 3, received ", len(os.Args))
+		fmt.Println("Usage: ./client <ip:port> <operation> <parameter>")
+		os.Exit(1)
+	}
+	serverURL	:= os.Args[1]
+	operation	:= os.Args[2]
+	var token string
+	if len(os.Args) == 4 {
+		token		= os.Args[3]
+	}
 
-	operation := os.Args[1]
 
 	// Create a `workloadapi.X509Source`, it will connect to Workload API using provided socket path
 	source, err := workloadapi.NewX509Source(ctx, workloadapi.WithClientOptions(workloadapi.WithAddr(socketPath)))
@@ -74,30 +82,20 @@ func main() {
 	}
 
 	switch operation {
-    case "mint":
-		// mint endpoint test
-		token := os.Args[2]
-		endpoint = "https://"+serverURL+"/mint?AccessToken="+token
-
-    case "keys":
-        // keys endpoint test
-		endpoint = "https://"+serverURL+"/keys"
-
-    case "validate":
-		
-		dasvid := os.Args[2]
-		// validate endpoint test
-		endpoint = "https://"+serverURL+"/validate?DASVID="+dasvid
-
-	case "introspect":
-		
-		dasvid := os.Args[2]
-		// introspect endpoint test
-		endpoint = "https://"+serverURL+"/introspect?DASVID="+dasvid
-		
+		case "mint":
+			// mint endpoint test
+			endpoint = "https://"+serverURL+"/mint?AccessToken="+token
+		case "keys":
+			// keys endpoint test
+			endpoint = "https://"+serverURL+"/keys"
+		case "validate":
+			// validate endpoint test
+			endpoint = "https://"+serverURL+"/validate?DASVID="+token
+		case "introspect":
+			// introspect endpoint test
+			endpoint = "https://"+serverURL+"/introspect?DASVID="+token
 	}
 
-	// fmt.Println(endpoint)
 	r, err := client.Get(endpoint)
 	if err != nil {
 		log.Fatalf("Error connecting to %q: %v", serverURL, err)
