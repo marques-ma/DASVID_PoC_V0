@@ -25,7 +25,12 @@ import (
     "encoding/pem"
 
 	// To JWT generation
+	// Obs: change jwt lib togo-jose could be good as it is the lib used in spire 
+	// "gopkg.in/square/go-jose.v2"
+	// "gopkg.in/square/go-jose.v2/cryptosigner"
+	// mintJWT "gopkg.in/square/go-jose.v2/jwt"
 	mint "github.com/golang-jwt/jwt"
+	JWTworker "github.com/dgrijalva/jwt-go"
 	"flag"
 
 	// To fetch SVID
@@ -75,16 +80,7 @@ type JWK struct {
 	X5t string
 }
 
-func timeTrack(start time.Time, name string) {
-    elapsed := time.Since(start)
-    log.Printf("%s execution time is %s", name, elapsed)
-}
-
-
 func VerifySignature(jwtToken string, key JWK) error {
-
-	defer timeTrack(time.Now(), "Verify Signature")
-
 	parts := strings.Split(jwtToken, ".")
 	message := []byte(strings.Join(parts[0:2], "."))
 	signature, err := base64.RawURLEncoding.DecodeString(parts[2])
@@ -151,23 +147,17 @@ func Mintdasvid(iss string, sub string, dpa string, dpr string, key interface{})
 }
 
 func ParseTokenClaims(strAT string) map[string]interface{} {
-
-	defer timeTrack(time.Now(), "Parse token claims")
-
 		// Parse access token without validating signature
-		token, _, err := new(mint.Parser).ParseUnverified(strAT, mint.MapClaims{})
+		token, _, err := new(JWTworker.Parser).ParseUnverified(strAT, JWTworker.MapClaims{})
 		if err != nil {
 			log.Fatalf("Error parsing JWT claims: %v", err)
 		}
-		claims, _ := token.Claims.(mint.MapClaims)
+		claims, _ := token.Claims.(JWTworker.MapClaims)
 		
-		// fmt.Println(claims)
 		return claims
 }
 
 func ValidateTokenExp(claims map[string]interface{}) (expresult bool, remainingtime string) {
-
-	defer timeTrack(time.Now(), "Validate token exp")
 
 	tm := time.Unix(int64(claims["exp"].(float64)), 0)
 	remaining := tm.Sub(time.Now())
@@ -268,9 +258,6 @@ func RetrieveJWKSPublicKey(path string) JWKS {
 }
 
 func FetchX509SVID() *x509svid.SVID {
-
-	defer timeTrack(time.Now(), "Fetchx509svid")
-
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	
