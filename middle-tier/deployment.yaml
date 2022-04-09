@@ -1,0 +1,37 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: middletier
+  labels:
+    app: middletier
+spec:
+  selector:
+    matchLabels:
+      app: middletier
+  template:
+    metadata:
+      labels:
+        app: middletier
+    spec:
+      containers:
+      - name: middletier
+        imagePullPolicy: IfNotPresent
+        image: middletier-k8s:latest
+        ports:
+        - containerPort: 8445
+        volumeMounts:
+        - name: spire-agent-socket
+          mountPath: /run/spire/sockets
+          readOnly: true          
+      volumes:
+      - name: spire-agent-socket
+        hostPath:
+          path: /run/spire/sockets
+          type: DirectoryOrCreate
+      hostAliases:
+      - ip: "172.17.0.5"
+        hostnames:
+        - "assertingwl-k8s"     
+      - ip: "172.17.0.7"
+        hostnames:
+        - "targetwl-k8s"    

@@ -215,7 +215,11 @@ func MintHandler(w http.ResponseWriter, r *http.Request) {
 
 		// Load private key from pem file used to sign DASVID
 		awprivatekey := dasvid.RetrievePrivateKey("./keys/key.pem")
-
+		
+		// Load public key to extract kid
+		pubkey = dasvid.RetrieveJWKSPublicKey("./keys/jwks.json")
+		fmt.Println("key ", pubkey.Keys[0])
+		kid := pubkey.Keys[0].Kid
 		var token string
 		
 		if os.Getenv("MINT_ZKP") == "true" {
@@ -238,9 +242,9 @@ func MintHandler(w http.ResponseWriter, r *http.Request) {
 			if os.Getenv("ADD_ZKP") == "true" {
 				log.Printf("Adding ZKP into DASVID...")
 				// Generate DASVID
-				token = dasvid.Mintdasvid(iss, sub, dpa, dpr, oam, zkp, awprivatekey)
+				token = dasvid.Mintdasvid(kid, iss, sub, dpa, dpr, oam, zkp, awprivatekey)
 			} else {
-				token = dasvid.Mintdasvid(iss, sub, dpa, dpr, nil, "", awprivatekey)
+				token = dasvid.Mintdasvid(kid, iss, sub, dpa, dpr, nil, "", awprivatekey)
 			}
 
 			// Data to be write in cache file
@@ -259,7 +263,7 @@ func MintHandler(w http.ResponseWriter, r *http.Request) {
 			dpr := fmt.Sprintf("%v", tokenclaims["sub"])
 
 			// Generate DASVID
-			token = dasvid.Mintdasvid(iss, sub, dpa, dpr, nil, "", awprivatekey)
+			token = dasvid.Mintdasvid(kid, iss, sub, dpa, dpr, nil, "", awprivatekey)
 
 			// Data to be write in cache file
 			Filetemp = FileContents{

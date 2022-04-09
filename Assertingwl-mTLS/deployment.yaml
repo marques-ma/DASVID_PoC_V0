@@ -1,0 +1,30 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: asserting-wl
+  labels:
+    app: asserting-wl
+spec:
+  selector:
+    matchLabels:
+      app: asserting-wl
+  template:
+    metadata:
+      labels:
+        app: asserting-wl
+    spec:
+      containers:
+      - name: asserting-wl
+        imagePullPolicy: IfNotPresent
+        image: asserting-wl:latest
+        ports:
+        - containerPort: 8443
+        volumeMounts:
+        - name: spire-agent-socket
+          mountPath: /run/spire/sockets
+          readOnly: true          
+      volumes:
+      - name: spire-agent-socket
+        hostPath:
+          path: /run/spire/sockets
+          type: DirectoryOrCreate          

@@ -1,0 +1,34 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: target-wl
+  labels:
+    app: target-wl
+spec:
+  selector:
+    matchLabels:
+      app: target-wl
+  template:
+    metadata:
+      labels:
+        app: target-wl
+    spec:
+      containers:
+      - name: target-wl
+        imagePullPolicy: IfNotPresent
+        image: targetwl-k8s:latest
+        ports:
+        - containerPort: 8444
+        volumeMounts:
+        - name: spire-agent-socket
+          mountPath: /run/spire/sockets
+          readOnly: true          
+      volumes:
+      - name: spire-agent-socket
+        hostPath:
+          path: /run/spire/sockets
+          type: DirectoryOrCreate
+      hostAliases:
+      - ip: "172.17.0.5"
+        hostnames:
+        - "assertingwl-k8s"     

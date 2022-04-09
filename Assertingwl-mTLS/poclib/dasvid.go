@@ -108,6 +108,9 @@ func timeTrack(start time.Time, name string) {
     log.Printf("%s execution time is %s", name, elapsed)
 }
 
+// Verify JWT token signature.
+// currently supporting RSA. Adding new switch cases to support ECDSA and HMAC.
+// 
 func VerifySignature(jwtToken string, key JWK) error {
 	defer timeTrack(time.Now(), "Verify Signature")
 
@@ -122,36 +125,39 @@ func VerifySignature(jwtToken string, key JWK) error {
 	jsonheader := string(decodedheader)   
 	algtype := extractValue(jsonheader, "alg")
 
-	if (algtype == "RS256") && (key.Kty == "RSA") {
-
-		log.Printf("Success! Key type %s is supported!", algtype)
-		n, _ := base64.RawURLEncoding.DecodeString(key.N)
-		e, _ := base64.RawURLEncoding.DecodeString(key.E)
-		z := new(big.Int)
-		z.SetBytes(n)
-		//decoding key.E returns a three byte slice, https://golang.org/pkg/encoding/binary/#Read and other conversions fail
-		//since they are expecting to read as many bytes as the size of int being returned (4 bytes for uint32 for example)
-		var buffer bytes.Buffer
-		buffer.WriteByte(0)
-		buffer.Write(e)
-		exponent := binary.BigEndian.Uint32(buffer.Bytes())
-		publicKey := &rsa.PublicKey{N: z, E: int(exponent)}
-	
-		// Only small messages can be signed directly; thus the hash of a
-		// message, rather than the message itself, is signed.
-		hasher := crypto.SHA256.New()
-		hasher.Write(message)
-	
-		err = rsa.VerifyPKCS1v15(publicKey, crypto.SHA256, hasher.Sum(nil), signature)
-		return err		
-
-	} else {
-		log.Printf("Error in signature verification: Algorithm %s not supported!", algtype)
-		return errors.New("Algorithm not supported!")
+	switch {
+		//  TODO.
+		//  Kid added in mint function. Verify possible benefits here. If none, remove from there.
+		case (algtype == "RS256"), (key.Kty == "RSA"): {
+			log.Printf("Success! Key type %s is supported!", algtype)
+			n, _ := base64.RawURLEncoding.DecodeString(key.N)
+			e, _ := base64.RawURLEncoding.DecodeString(key.E)
+			z := new(big.Int)
+			z.SetBytes(n)
+			//decoding key.E returns a three byte slice, https://golang.org/pkg/encoding/binary/#Read and other conversions fail
+			//since they are expecting to read as many bytes as the size of int being returned (4 bytes for uint32 for example)
+			var buffer bytes.Buffer
+			buffer.WriteByte(0)
+			buffer.Write(e)
+			exponent := binary.BigEndian.Uint32(buffer.Bytes())
+			publicKey := &rsa.PublicKey{N: z, E: int(exponent)}
+		
+			// Only small messages can be signed directly; thus the hash of a
+			// message, rather than the message itself, is signed.
+			hasher := crypto.SHA256.New()
+			hasher.Write(message)
+		
+			err = rsa.VerifyPKCS1v15(publicKey, crypto.SHA256, hasher.Sum(nil), signature)
+			return err
+		}
+		default: {
+			log.Printf("Error in signature verification: Algorithm %s not supported!", algtype)
+			return errors.New("Algorithm not supported!")
+		}
 	}
 }
 
-func Mintdasvid(iss string, sub string, dpa string, dpr string, oam []byte, zkp string, key interface{}) string{
+func Mintdasvid(kid string, iss string, sub string, dpa string, dpr string, oam []byte, zkp string, key interface{}) string{
 	defer timeTrack(time.Now(), "Mintdasvid")
 
 	flag.CommandLine = flag.NewFlagSet(os.Args[0], flag.ExitOnError)
@@ -175,6 +181,7 @@ func Mintdasvid(iss string, sub string, dpa string, dpr string, oam []byte, zkp 
 		oam  := flag.String("oam", string(oam), "Oauth token without signature part")
 		proof := flag.String("zkp", zkp, "OAuth Zero-Knowledge-Proof")
 
+		
 		token = mint.NewWithClaims(mint.SigningMethodRS256, mint.MapClaims{
 			"exp": *exp,
 			"iss": *issuer,
@@ -204,6 +211,8 @@ func Mintdasvid(iss string, sub string, dpa string, dpr string, oam []byte, zkp 
 	flag.Parse()
 
 	// Sign Token
+	token.Header["kid"] = kid
+	
  	tokenString, err := token.SignedString(key)
  	if err != nil {
         log.Printf("Error generating JWT: %v", err)
@@ -564,6 +573,8 @@ func FetchX509SVID() *x509svid.SVID {
 	if err != nil {
 		log.Fatalf("Unable to fetch SVID: %v", err)
 	}
+
+	// fmt.Println("svid.PrivateKey", svid.PrivateKey)
 
 	return svid
 }

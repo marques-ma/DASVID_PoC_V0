@@ -125,7 +125,8 @@ func main() {
 	ParseEnvironment()
 
 	// Retrieve local IP
-	uri := GetOutboundIP(":8080")
+	// uri := GetOutboundIP(":8080")
+	uri := "127.0.0.1:8080"
 
 	http.HandleFunc("/", HomeHandler)
 	http.HandleFunc("/login", LoginHandler)
