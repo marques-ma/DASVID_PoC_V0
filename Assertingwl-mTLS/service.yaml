@@ -5,9 +5,9 @@ metadata:
 spec:
   type: LoadBalancer
   ports:
-   - port: 8443
-     name: http
+   - name: http
+     port: 8443
      protocol: TCP
-     targetPort: 8443
+     targetPort: awl-port
   selector:
-      app: subject-wl
+      app: asserting-wl

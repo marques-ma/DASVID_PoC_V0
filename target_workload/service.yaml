@@ -8,6 +8,6 @@ spec:
    - port: 8444
      name: http
      protocol: TCP
-     targetPort: 8444
+     targetPort: target-wl
   selector:
       app: target-wl

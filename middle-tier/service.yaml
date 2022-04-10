@@ -8,6 +8,6 @@ spec:
    - port: 8445
      name: http
      protocol: TCP
-     targetPort: 8445
+     targetPort: middletier
   selector:
       app: middletier

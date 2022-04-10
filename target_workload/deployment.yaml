@@ -19,6 +19,7 @@ spec:
         image: targetwl-k8s:latest
         ports:
         - containerPort: 8444
+          name: target-wl
         volumeMounts:
         - name: spire-agent-socket
           mountPath: /run/spire/sockets
@@ -28,7 +29,3 @@ spec:
         hostPath:
           path: /run/spire/sockets
           type: DirectoryOrCreate
-      hostAliases:
-      - ip: "172.17.0.5"
-        hostnames:
-        - "assertingwl-k8s"     
