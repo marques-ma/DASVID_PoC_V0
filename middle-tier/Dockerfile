@@ -40,7 +40,7 @@ RUN go build -o main .
 # Define the running base image 
 FROM alpine 
 
-LABEL "type"="middletier"
+LABEL "type"="middle-tier"
 
 ### Set working directory  
 RUN mkdir /build

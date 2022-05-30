@@ -70,6 +70,17 @@ var temp Contents
 func timeTrack(start time.Time, name string) {
     elapsed := time.Since(start)
     log.Printf("%s execution time is %s", name, elapsed)
+
+	// If the file doesn't exist, create it, or append to the file
+	file, err := os.OpenFile("./bench.data", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		log.Fatal(err)
+	}
+	log.Printf("Writing to file...")
+	json.NewEncoder(file).Encode(fmt.Sprintf("%s execution time is %s", name, elapsed))
+	if err := file.Close(); err != nil {
+		log.Fatal(err)
+	}
 }
 
 func main() {
@@ -123,7 +134,7 @@ func Get_balanceHandler(w http.ResponseWriter, r *http.Request) {
 	defer source.Close()
 
 	// Allowed SPIFFE ID
-	serverID := spiffeid.RequireTrustDomainFromString("example.org")
+	serverID := spiffeid.RequireTrustDomainFromString(os.Getenv("TRUST_DOMAIN"))
 
 	// Create a `tls.Config` to allow mTLS connections, and verify that presented certificate match allowed SPIFFE ID rule
 	tlsConfig := tlsconfig.MTLSClientConfig(source, source, tlsconfig.AuthorizeMemberOf(serverID))

@@ -16,7 +16,7 @@ spec:
       containers:
       - name: target-wl
         imagePullPolicy: IfNotPresent
-        image: targetwl-k8s:latest
+        image: target-wl:latest
         ports:
         - containerPort: 8444
           name: target-wl

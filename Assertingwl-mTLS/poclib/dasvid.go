@@ -1,4 +1,3 @@
-//+build linux,cgo 
 package dasvid
 /*
 #include <string.h>
@@ -41,8 +40,11 @@ import (
 
 	"time"
 	"os"
-    "os/exec"
+    // "os/exec"
+	"net/http"
 	"encoding/json"
+	"io"
+	// "io/ioutil"
 		
 	// // to retrieve PrivateKey
 	"bufio"
@@ -255,11 +257,12 @@ func GenZKPproof(OAuthToken string) string {
 	defer timeTrack(time.Now(), "Generate ZKP")
 
 	var bigN, bigE, bigSig, bigMsg *C.BIGNUM
+	var vkey *C.EVP_PKEY
 
     parts := strings.Split(OAuthToken, ".")
 	
     // Generate OpenSSL vkey using token
-	vkey := Token2vkey(OAuthToken, 0)
+	vkey = Token2vkey(OAuthToken, 0)
 
 	// Generate signature BIGNUM
 	signature, err := base64.RawURLEncoding.DecodeString(parts[2])
@@ -386,8 +389,10 @@ func Token2vkey(token string, issfield int) *C.EVP_PKEY {
 	var issuer string
 	if issfield == 0 {
 		issuer = fmt.Sprintf("%v", tokenclaims["iss"])
+		log.Printf("OAuth issuer claim: %s", issuer)
 	} else if issfield ==1 {
 		issuer = fmt.Sprintf("%v", tokenclaims["dpa"])
+		log.Printf("DASVID issuer claim: %s", issuer)
 	} else {
 		log.Fatal("No issuer field informed.")
 	}
@@ -396,19 +401,33 @@ func Token2vkey(token string, issfield int) *C.EVP_PKEY {
 	if result != true {
 		log.Fatal("OAuth token issuer not identified!")
 	}
+	
+	resp, err := http.Get(uri)
+	defer resp.Body.Close()
 
-    // Use script to convert jwk retrieved from OKTA endpoint to PEM file and save in ./keys/
-    cmd := exec.Command("./poclib/jwk2der.sh", uri)
-    err := cmd.Run()
-    if err != nil {
-        log.Fatal(err)
-    }
+	out, err := os.Create("./keys/oauth.json")
+	if err != nil {
+		log.Printf("Error creating Oauth public key cache file: %v", err)
+	}
+	defer out.Close()
+	io.Copy(out, resp.Body)
+
+	Jwks2PEM(token, "./keys/oauth.json")
 
     // Open OAuth PEM file containing Public Key
     filepem = C.fopen((C.CString)(os.Getenv("PEM_PATH")),(C.CString)("r")) 
+	if filepem == nil {
+        log.Fatal("Error opening PEM file!")
+    }
+
+	log.Printf("filepem generated: %v", filepem)
   
     // Load key from PEM file to VKEY
+	vkey = nil
     C.PEM_read_PUBKEY(filepem, &vkey, nil, nil)
+
+	log.Printf("vkey generated: %v", vkey)
+	C.fclose(filepem)
 
 	return vkey
 }
@@ -533,6 +552,8 @@ func RetrieveDERPublicKey(path string) []byte {
 	// Return DER
 	marshpubic, _ := x509.MarshalPKIXPublicKey(publicKey)
     // log.Printf("Success returning DER: ", marshpubic)
+
+
 	return marshpubic 
 }
 
@@ -589,4 +610,85 @@ func extractValue(body string, key string) string {
     match := r.FindString(body)
     keyValMatch := strings.Split(match, ":")
     return strings.ReplaceAll(keyValMatch[1], "\"", "")
+}
+
+func Jwks2PEM(token string, path string) {
+	defer timeTrack(time.Now(), "RetrieveDERPublicKey")
+
+	pubkey := RetrieveJWKSPublicKey(path)
+
+	// Verify token signature using extracted Public key
+	for i :=0; i<len(pubkey.Keys); i++ {
+
+		err := VerifySignature(token, pubkey.Keys[i])
+		if err == nil {
+
+			fmt.Println("Creating pubkey: ", pubkey.Keys[i].Kty)
+
+			if pubkey.Keys[i].Kty != "RSA" {
+				log.Fatal("invalid key type:", pubkey.Keys[i].Kty)
+			}
+
+			// decode the base64 bytes for n
+			nb, err := base64.RawURLEncoding.DecodeString(pubkey.Keys[i].N)
+			if err != nil {
+				log.Fatal(err)
+			}
+
+			e := 0
+			// The default exponent is usually 65537, so just compare the
+			// base64 for [1,0,1] or [0,1,0,1]
+			if pubkey.Keys[i].E == "AQAB" || pubkey.Keys[i].E == "AAEAAQ" {
+				e = 65537
+			} else {
+				// need to decode "e" as a big-endian int
+				log.Fatal("need to decode e:", pubkey.Keys[i].E)
+			}
+
+			pk := &rsa.PublicKey{
+				N: new(big.Int).SetBytes(nb),
+				E: e,
+			}
+
+			der, err := x509.MarshalPKIXPublicKey(pk)
+			if err != nil {
+				log.Fatal(err)
+			}
+
+			block := &pem.Block{
+				Type:  "PUBLIC KEY",
+				Bytes: der,
+			}
+
+			var out bytes.Buffer
+			pem.Encode(&out, block)
+			fmt.Println("Generated public key in PEM format: ", out.String())
+			
+			// Create output file
+			file, err := os.Create("./keys/oauth.pem")
+			if err != nil {
+				log.Fatal(err)
+			}
+				
+			log.Printf("Writing PEM file...")
+			_, err = file.Write(out.Bytes())
+			if err != nil {
+				log.Fatal("Error writing PEM file: ", err)
+			}
+			file.Close()
+
+			// log.Printf("Opening created file:")
+			// ftest, err := os.Open("./keys/oauth.pem")
+			// if err != nil {
+			// 	log.Fatal(err)
+			// }
+
+			// scanner := bufio.NewScanner(ftest)
+			// log.Printf("Verifying created file:")
+			// for scanner.Scan() {             // internally, it advances token based on sperator
+			// 	fmt.Println(scanner.Text())  // token in unicode-char
+			// }
+			// ftest.Close()
+		}
+	}
 }

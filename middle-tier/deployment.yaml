@@ -1,25 +1,25 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: middletier
+  name: middle-tier
   labels:
-    app: middletier
+    app: middle-tier
 spec:
   selector:
     matchLabels:
-      app: middletier
+      app: middle-tier
   template:
     metadata:
       labels:
-        app: middletier
+        app: middle-tier
     spec:
       containers:
-      - name: middletier
+      - name: middle-tier
         imagePullPolicy: IfNotPresent
-        image: middletier-k8s:latest
+        image: middle-tier:latest
         ports:
         - containerPort: 8445
-          name: middletier
+          name: middle-port
         volumeMounts:
         - name: spire-agent-socket
           mountPath: /run/spire/sockets
