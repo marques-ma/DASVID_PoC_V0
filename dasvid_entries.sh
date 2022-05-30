@@ -41,7 +41,7 @@ register \
     -spiffeID spiffe://example.org/middletier \
     -selector k8s:ns:default \
     -selector k8s:sa:default \
-    -selector k8s:pod-label:app:middle-tier
+    -selector k8s:pod-label:app:middletier
 
 echo "${bb}Creating registration entry for the target workload...${nn}"
 register \
@@ -50,6 +50,7 @@ register \
     -selector k8s:ns:default \
     -selector k8s:sa:default \
     -selector k8s:pod-label:app:target-wl
+
 
 echo "${bb}Listing created registration entries...${nn}"
 kubectl exec -n spire spire-server-0 -- /opt/spire/bin/spire-server entry show

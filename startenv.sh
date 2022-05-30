@@ -66,3 +66,4 @@ spire-server entry create \
 spire-server entry create \
     -parentID spiffe://example.org/host \
     -spiffeID spiffe://example.org/middletier \
+    -selector docker:label:type:middletier 
